@@ -1,0 +1,35 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PermissionControlSystem.Application.Contracts/PermissionControlSystem.Application.Contracts.csproj" />
+    <Project Path="src/PermissionControlSystem.Application/PermissionControlSystem.Application.csproj" />
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <Project Path="src/PermissionControlSystem.DbMigrator/PermissionControlSystem.DbMigrator.csproj" />
+    <Project Path="src/PermissionControlSystem.Domain.Shared/PermissionControlSystem.Domain.Shared.csproj" />
+    <Project Path="src/PermissionControlSystem.Domain/PermissionControlSystem.Domain.csproj" />
+    <Project Path="src/PermissionControlSystem.EntityFrameworkCore/PermissionControlSystem.EntityFrameworkCore.csproj" />
+    <Project Path="src/PermissionControlSystem.HttpApi.Client/PermissionControlSystem.HttpApi.Client.csproj" />
+    
+    <Project Path="src/PermissionControlSystem.HttpApi.Host/PermissionControlSystem.HttpApi.Host.csproj" />
+    <Project Path="src/PermissionControlSystem.HttpApi/PermissionControlSystem.HttpApi.csproj" />
+    
+    
+    
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/PermissionControlSystem.Application.Tests/PermissionControlSystem.Application.Tests.csproj" />
+    <Project Path="test/PermissionControlSystem.Domain.Tests/PermissionControlSystem.Domain.Tests.csproj" />
+    <Project Path="test/PermissionControlSystem.EntityFrameworkCore.Tests/PermissionControlSystem.EntityFrameworkCore.Tests.csproj" />
+    <Project Path="test/PermissionControlSystem.HttpApi.Client.ConsoleTestApp/PermissionControlSystem.HttpApi.Client.ConsoleTestApp.csproj" />
+    
+    <Project Path="test/PermissionControlSystem.TestBase/PermissionControlSystem.TestBase.csproj" />
+    
+  </Folder>
+</Solution>
