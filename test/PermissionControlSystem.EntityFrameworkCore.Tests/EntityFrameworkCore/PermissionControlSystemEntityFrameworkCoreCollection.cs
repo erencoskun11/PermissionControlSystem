@@ -1,0 +1,9 @@
+﻿using Xunit;
+
+namespace PermissionControlSystem.EntityFrameworkCore;
+
+[CollectionDefinition(PermissionControlSystemTestConsts.CollectionDefinitionName)]
+public class PermissionControlSystemEntityFrameworkCoreCollection : ICollectionFixture<PermissionControlSystemEntityFrameworkCoreFixture>
+{
+
+}

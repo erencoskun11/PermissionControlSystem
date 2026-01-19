@@ -1,0 +1,9 @@
+﻿using PermissionControlSystem.EntityFrameworkCore;
+using Xunit;
+
+namespace PermissionControlSystem.EntityFrameworkCore;
+
+public class PermissionControlSystemEntityFrameworkCoreCollectionFixtureBase : ICollectionFixture<PermissionControlSystemEntityFrameworkCoreFixture>
+{
+
+}
