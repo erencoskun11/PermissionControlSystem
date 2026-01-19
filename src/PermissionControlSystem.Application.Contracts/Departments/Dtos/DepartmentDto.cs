@@ -1,0 +1,12 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+using Volo.Abp.Application.Dtos;
+namespace PermissionControlSystem.Departments.Dtos
+{
+     public class DepartmentDto : EntityDto<Guid> // 'public' olduğundan emin ol!
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+    }
+}
