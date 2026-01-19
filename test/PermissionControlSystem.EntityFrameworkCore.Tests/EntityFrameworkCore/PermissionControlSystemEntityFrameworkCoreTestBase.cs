@@ -1,0 +1,8 @@
+﻿using Volo.Abp;
+
+namespace PermissionControlSystem.EntityFrameworkCore;
+
+public abstract class PermissionControlSystemEntityFrameworkCoreTestBase : PermissionControlSystemTestBase<PermissionControlSystemEntityFrameworkCoreTestModule>
+{
+
+}
