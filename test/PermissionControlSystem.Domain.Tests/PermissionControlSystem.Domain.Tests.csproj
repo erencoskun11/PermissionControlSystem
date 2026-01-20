@@ -1,20 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\common.props" />
+	<Import Project="..\..\common.props" />
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <RootNamespace>PermissionControlSystem</RootNamespace>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<RootNamespace>PermissionControlSystem</RootNamespace>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\PermissionControlSystem.Domain\PermissionControlSystem.Domain.csproj" />
-    <ProjectReference Include="..\PermissionControlSystem.TestBase\PermissionControlSystem.TestBase.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\PermissionControlSystem.EntityFrameworkCore.Tests\PermissionControlSystem.EntityFrameworkCore.Tests.csproj" />
+
+		<ProjectReference Include="..\..\src\PermissionControlSystem.Domain\PermissionControlSystem.Domain.csproj" />
+		<ProjectReference Include="..\PermissionControlSystem.TestBase\PermissionControlSystem.TestBase.csproj" />
+	</ItemGroup>
 
 </Project>
