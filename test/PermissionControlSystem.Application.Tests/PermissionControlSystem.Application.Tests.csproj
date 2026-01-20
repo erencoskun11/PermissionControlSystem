@@ -6,15 +6,19 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <RootNamespace>PermissionControlSystem</RootNamespace>
+    <UserSecretsId>9055cde4-586e-4eb5-b9dd-53a364804315</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PermissionControlSystem.Application\PermissionControlSystem.Application.csproj" />
     <ProjectReference Include="..\PermissionControlSystem.Domain.Tests\PermissionControlSystem.Domain.Tests.csproj" />
+	  <PackageReference Include="Volo.Abp.EventBus.RabbitMq" Version="10.0.2" />
+	  <PackageReference Include="Volo.Abp.Caching.StackExchangeRedis" Version="10.0.2" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Volo.Abp.BlobStoring" Version="10.0.2" />
   </ItemGroup>
 
 </Project>
