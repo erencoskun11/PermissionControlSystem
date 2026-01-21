@@ -11,17 +11,19 @@ using Volo.Abp.Modularity;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Uow;
+using Volo.Abp.FeatureManagement.EntityFrameworkCore;
 
 namespace PermissionControlSystem.EntityFrameworkCore;
 
 [DependsOn(
-    typeof(PermissionControlSystemApplicationTestModule),
-    typeof(PermissionControlSystemEntityFrameworkCoreModule),
-    typeof(AbpEntityFrameworkCoreSqliteModule)
+    typeof(PermissionControlSystemEntityFrameworkCoreModule), // Ana Proje
+    typeof(PermissionControlSystemTestBaseModule),            // <-- DÜZELTME: DomainTest YERİNE TestBase olmalı!
+    typeof(AbpEntityFrameworkCoreSqliteModule),
+    typeof(AbpFeatureManagementEntityFrameworkCoreModule)     // Feature Management Fix
     )]
 public class PermissionControlSystemEntityFrameworkCoreTestModule : AbpModule
 {
-    private SqliteConnection? _sqliteConnection;
+    private SqliteConnection _sqliteConnection;
 
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
@@ -40,20 +42,22 @@ public class PermissionControlSystemEntityFrameworkCoreTestModule : AbpModule
             options.SaveStaticSettingsToDatabase = false;
             options.IsDynamicSettingStoreEnabled = false;
         });
-        context.Services.AddAlwaysDisableUnitOfWorkTransaction();
 
+        context.Services.AddAlwaysDisableUnitOfWorkTransaction();
         ConfigureInMemorySqlite(context.Services);
     }
 
     private void ConfigureInMemorySqlite(IServiceCollection services)
     {
         _sqliteConnection = CreateDatabaseAndGetConnection();
-
         services.Configure<AbpDbContextOptions>(options =>
         {
             options.Configure(context =>
             {
-                context.DbContextOptions.UseSqlite(_sqliteConnection);
+                if (context.ExistingConnection == null)
+                {
+                    context.DbContextOptions.UseSqlite(_sqliteConnection);
+                }
             });
         });
     }
@@ -65,7 +69,7 @@ public class PermissionControlSystemEntityFrameworkCoreTestModule : AbpModule
 
     private static SqliteConnection CreateDatabaseAndGetConnection()
     {
-        var connection = new AbpUnitTestSqliteConnection("Data Source=:memory:");
+        var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
 
         var options = new DbContextOptionsBuilder<PermissionControlSystemDbContext>()
