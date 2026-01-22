@@ -11,21 +11,21 @@
 	<ItemGroup>
 		<PackageReference Include="Volo.Abp.FeatureManagement.EntityFrameworkCore" Version="10.0.2" />
 		<PackageReference Include="Volo.Abp.EntityFrameworkCore.Sqlite" Version="10.0.2" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.2" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\PermissionControlSystem.EntityFrameworkCore\PermissionControlSystem.EntityFrameworkCore.csproj" />
-
 		<ProjectReference Include="..\PermissionControlSystem.TestBase\PermissionControlSystem.TestBase.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="EntityFrameworkCore\Applications\" />
-	  <Folder Include="EntityFrameworkCore\Domains\" />
+		<Folder Include="EntityFrameworkCore\Applications\" />
+		<Folder Include="EntityFrameworkCore\Domains\" />
 	</ItemGroup>
 
 </Project>
