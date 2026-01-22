@@ -4,8 +4,6 @@ using PermissionControlSystem.Events;
 using Shouldly;
 using Volo.Abp.EventBus.Distributed;
 using Xunit;
-using Microsoft.Extensions.DependencyInjection; 
-
 namespace PermissionControlSystem;
 
 [Collection(PermissionControlSystemTestConsts.CollectionDefinitionName)]
@@ -21,7 +19,7 @@ public class RabbitMqIntegrationTest : PermissionControlSystemApplicationTestBas
     [Fact]
     public async Task Should_Connect_And_Publish_To_RabbitMq()
     {
-        // 
+        
         var testEvent = new LeaveApprovedEto
         {
             LeaveRequestId = Guid.NewGuid(),
