@@ -1,6 +1,12 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using JetBrains.Annotations;
+using Microsoft.Extensions.DependencyInjection;
+using PermissionControlSystem.Workers;
+using System.Threading.Tasks;
+using Volo.Abp;
 using Volo.Abp.Account;
-using Volo.Abp.AutoMapper; // AutoMapper kütüphanesi
+using Volo.Abp.AutoMapper; 
+using Volo.Abp.BackgroundWorkers;
+using Volo.Abp.Emailing;
 using Volo.Abp.FeatureManagement;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
@@ -19,7 +25,8 @@ namespace PermissionControlSystem;
     typeof(AbpTenantManagementApplicationModule),
     typeof(AbpFeatureManagementApplicationModule),
     typeof(AbpSettingManagementApplicationModule),
-    typeof(AbpAutoMapperModule) // Modül bağımlılığı eklendi
+    typeof(AbpAutoMapperModule),
+    typeof(AbpEmailingModule) 
     )]
 public class PermissionControlSystemApplicationModule : AbpModule
 {
@@ -32,6 +39,16 @@ public class PermissionControlSystemApplicationModule : AbpModule
         Configure<AbpAutoMapperOptions>(options =>
         {
             options.AddMaps<PermissionControlSystemApplicationModule>();
-        });
+        }); 
     }
+    // --- BU METODU EKLE VEYA GÜNCELLE ---
+    public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        // Arka plan işçisini başlat
+        await context.AddBackgroundWorkerAsync<PendingLeavesCheckerWorker>();
+    }
+
+
+
+
 }
