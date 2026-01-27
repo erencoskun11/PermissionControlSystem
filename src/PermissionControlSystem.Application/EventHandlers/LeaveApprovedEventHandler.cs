@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PermissionControlSystem.Events;
 using Polly;
 using Polly.CircuitBreaker;
@@ -8,6 +9,7 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Emailing;
 using Volo.Abp.EventBus.Distributed;
+using Npgsql; 
 
 namespace PermissionControlSystem.EventHandlers
 {
@@ -17,21 +19,19 @@ namespace PermissionControlSystem.EventHandlers
         private readonly IEmailSender _emailSender;
         private readonly IRepository<IncomingMessage, Guid> _incomingMessageRepository;
 
-        // SİGORTA TANIMI
         private static readonly AsyncCircuitBreakerPolicy _mailCircuitBreaker = Policy
             .Handle<Exception>()
             .CircuitBreakerAsync(
-                exceptionsAllowedBeforeBreaking: 3,
-                durationOfBreak: TimeSpan.FromSeconds(30),
+                3,
+                TimeSpan.FromSeconds(30),
                 onBreak: (ex, time) =>
                 {
-                    Console.WriteLine($"⚠️ DİKKAT: Mail servisi cevap vermiyor! Sigorta attı. {time.TotalSeconds} saniye bekleyeceğiz.");
+                    Console.WriteLine($"⚠️ Mail servisi cevap vermiyor! {time.TotalSeconds} sn bekleme.");
                 },
                 onReset: () =>
                 {
-                    Console.WriteLine("✅ SİGORTA KAPANDI: Mail servisi tekrar devrede.");
-                }
-            );
+                    Console.WriteLine("✅ Mail servisi tekrar devrede.");
+                });
 
         public LeaveApprovedEventHandler(
             ILogger<LeaveApprovedEventHandler> logger,
@@ -45,47 +45,51 @@ namespace PermissionControlSystem.EventHandlers
 
         public async Task HandleEventAsync(LeaveApprovedEto eventData)
         {
-            // 1. INBOX KONTROLÜ
-            var alreadyProcessed = await _incomingMessageRepository.AnyAsync(x => x.EventId == eventData.EventId);
-            if (alreadyProcessed)
-            {
-                _logger.LogWarning($"[INBOX]: Mesaj (ID: {eventData.EventId}) daha önce işlenmiş! Pas geçiliyor. 🛑");
-                return;
-            }
+            _logger.LogInformation($"[RABBITMQ] LeaveApproved işlendi. LeaveId: {eventData.LeaveRequestId}");
 
-            _logger.LogInformation($"[RABBITMQ]: İzin {eventData.LeaveRequestId} işleniyor...");
+            var toEmail = "eren1coskun11@gmail.com";
+            var subject = "İzin Talebiniz Onaylandı!";
+            var body = "Sayın çalışanımız, izin talebiniz onaylanmıştır.";
 
-            var toEmail = "eren1coskun11@gmail.com"; 
-            var subject = "İzin Talebiniz Onaylandı! 🎉";
-            var body = $"Sayın çalışanımız,<br>İzin talebiniz onaylanmıştır.";
-
-            // 2. SİGORTALI İŞLEM (DÜZELTİLEN KISIM BURASI) 👇
             try
             {
-                // Mail atma işlemini Sigorta Politikası içine sarıyoruz!
+                // 1. Mail gönder
                 await _mailCircuitBreaker.ExecuteAsync(async () =>
                 {
                     await _emailSender.SendAsync(toEmail, subject, body);
                 });
 
-                _logger.LogInformation($"[BAŞARILI]: Mail gönderildi.");
+                _logger.LogInformation("📧 Mail başarıyla gönderildi.");
 
-                // 3. INBOX KAYDI (Sadece başarılıysa kaydet)
-                await _incomingMessageRepository.InsertAsync(
-                    new IncomingMessage(eventData.EventId, "LeaveApproved")
-                );
+                // 2. Inbox kaydı → idempotency burada
+                try
+                {
+                    await _incomingMessageRepository.InsertAsync(
+                        new IncomingMessage(eventData.EventId, "LeaveApproved"),
+                        autoSave: true
+                    );
+                }
+                catch (DbUpdateException ex)
+                {
+                    // PostgreSQL unique constraint
+                    if (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
+                    {
+                        _logger.LogWarning($"[INBOX] Mesaj zaten işlenmişti (EventId: {eventData.EventId}). Atlandı.");
+                        return;
+                    }
+
+                    throw;
+                }
             }
             catch (BrokenCircuitException)
             {
-                // Sigorta açıksa (Hala cezalıysak) buraya düşer
-                _logger.LogError($"🛑 SİGORTA ATIK: Mail servisine gidilmedi. Mesaj kuyruğa geri bırakılacak.");
-                throw; // Hatayı fırlat ki RabbitMQ mesajı silmesin, sonra tekrar denesin.
+                _logger.LogError("🛑 Mail servisi sigortaya girdi. Mesaj tekrar denenecek.");
+                throw;
             }
             catch (Exception ex)
             {
-                // Diğer hatalar
-                _logger.LogError($"❌ HATA: Mail atılamadı. Detay: {ex.Message}");
-                throw; // RabbitMQ tekrar denesin.
+                _logger.LogError(ex, "❌ LeaveApprovedEventHandler hata aldı.");
+                throw;
             }
         }
     }
