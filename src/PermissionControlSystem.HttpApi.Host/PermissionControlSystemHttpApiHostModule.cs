@@ -1,28 +1,33 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using PermissionControlSystem.EntityFrameworkCore;
-using PermissionControlSystem.MultiTenancy;
-using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite;
-using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Bundling;
 using Microsoft.OpenApi.Models;
 using OpenIddict.Validation.AspNetCore;
+using PermissionControlSystem.EntityFrameworkCore;
+using PermissionControlSystem.MultiTenancy;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Volo.Abp;
 using Volo.Abp.Account;
 using Volo.Abp.Account.Web;
 using Volo.Abp.AspNetCore.MultiTenancy;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.AspNetCore.Mvc.UI.Bundling;
+using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite;
+using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Bundling;
 using Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared;
 using Volo.Abp.AspNetCore.Serilog;
 using Volo.Abp.Autofac;
+using Volo.Abp.Caching;
+using Volo.Abp.Caching.StackExchangeRedis;
+using Volo.Abp.EntityFrameworkCore.DistributedEvents;
+using Volo.Abp.EventBus.Distributed;
+using Volo.Abp.EventBus.RabbitMq;
 using Volo.Abp.Localization;
 using Volo.Abp.Modularity;
 using Volo.Abp.Security.Claims;
@@ -33,6 +38,8 @@ using Volo.Abp.VirtualFileSystem;
 namespace PermissionControlSystem;
 
 [DependsOn(
+    typeof(AbpCachingStackExchangeRedisModule), 
+    typeof(AbpEventBusRabbitMqModule),          
     typeof(PermissionControlSystemHttpApiModule),
     typeof(AbpAutofacModule),
     typeof(AbpAspNetCoreMultiTenancyModule),
@@ -63,6 +70,48 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         var configuration = context.Services.GetConfiguration();
         var hostingEnvironment = context.Services.GetHostingEnvironment();
 
+        // --- REDIS AYARI BAŞLANGIÇ ---
+        Configure<AbpDistributedCacheOptions>(options =>
+        {
+            options.KeyPrefix = "PermissionSystem:";
+        });
+        // --- REDIS AYARI BİTİŞ ---
+
+        // --- RABBITMQ AYARI BAŞLANGIÇ ---
+        Configure<AbpRabbitMqEventBusOptions>(options =>
+        {
+            options.ClientName = "PermissionSystem_Client";
+            options.ExchangeName = "PermissionSystem_Exchange";
+
+        });
+
+        // =======================================================
+        // 🔥 OUTBOX / INBOX AKTİF ETME (TRANSACTIONAL EVENT SYSTEM)
+        // =======================================================
+       Configure<AbpDistributedEventBusOptions>(options=>
+       {
+           options.Outboxes.Configure(config =>
+           {
+               config.UseDbContext<PermissionControlSystemDbContext>();
+           });
+      
+
+            options.Inboxes.Configure(config =>
+            {
+                config.UseDbContext<PermissionControlSystemDbContext>();
+            });
+       });
+        // --- RABBITMQ AYARI BİTİŞ ---
+
+
+
+        context.Services.AddHealthChecks()
+    .AddNpgSql(configuration["ConnectionStrings:Default"], name: "Veritabani_SQL")
+    .AddRedis(configuration["Redis:Configuration"], name: "Redis_Cache");
+    
+
+
+
         ConfigureAuthentication(context);
         ConfigureBundles();
         ConfigureUrls(configuration);
@@ -70,6 +119,8 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         ConfigureVirtualFileSystem(context);
         ConfigureCors(context, configuration);
         ConfigureSwaggerServices(context, configuration);
+
+
     }
 
     private void ConfigureAuthentication(ServiceConfigurationContext context)
