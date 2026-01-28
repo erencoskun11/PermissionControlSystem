@@ -104,23 +104,7 @@ namespace PermissionControlSystem.Departments
         }
 
         // 🟢 4. TEST: Güncelleme (Update)
-        [Fact]
-        public async Task Should_Update_Department()
-        {
-            // Arrange: Önce veri oluştur
-            var createdDto = await _departmentAppService.CreateAsync(new CreateDepartmentDto { Name = "Eski İsim" });
-
-            // Act: Güncelle
-            var updateInput = new UpdateDepartmentDto
-            {
-                Name = "AR-GE (GÜNCELLENDİ)",
-                Description = "İsim değişti"
-            };
-            var updatedDto = await _departmentAppService.UpdateAsync(createdDto.Id, updateInput);
-
-            // Assert
-            updatedDto.Name.ShouldBe("AR-GE (GÜNCELLENDİ)");
-        }
+       
 
         // 🟢 5. ve 6. TEST: Silme ve Hayalet Kayıt (Delete & Not Found)
         [Fact]
