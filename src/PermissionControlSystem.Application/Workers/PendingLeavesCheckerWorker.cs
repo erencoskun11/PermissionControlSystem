@@ -1,7 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PermissionControlSystem.Enums;
+using PermissionControlSystem.Leave;
 using PermissionControlSystem.Leaves;
-using PermissionControlSystem.Leaves2;
 using System;
 using System.Collections.Generic;
 using System.Text;
