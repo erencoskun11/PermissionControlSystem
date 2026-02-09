@@ -1,12 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using PermissionControlSystem.Employees;
+using PermissionControlSystem.Enums;
 using PermissionControlSystem.Events;
-using PermissionControlSystem.Leaves.Dtos;
-using PermissionControlSystem.Leaves2;
-using PermissionControlSystem.Employees; 
+using PermissionControlSystem.Leave;
+using PermissionControlSystem.Leave.Dtos;
 using System;
-using System.Collections.Generic; 
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
-using System.Linq; // OrderBy için
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -18,35 +19,32 @@ namespace PermissionControlSystem.Leaves
     [Authorize]
     public class LeaveRequestAppService :
         CrudAppService<
-            LeaveRequest,           
-            LeaveRequestDto,        
-            LeaveRequestListDto,    
-            Guid,                   
-            PagedAndSortedResultRequestDto, 
-            CreateLeaveRequestDto,  
-            UpdateLeaveRequestDto>, 
+            LeaveRequest,
+            LeaveRequestDto,
+            LeaveRequestListDto,
+            Guid,
+            PagedAndSortedResultRequestDto,
+            CreateLeaveRequestDto,
+            UpdateLeaveRequestDto>,
         ILeaveRequestAppService
     {
         private readonly IDistributedEventBus _distributedEventBus;
-
         private readonly IRepository<Employee, Guid> _employeeRepository;
 
         public LeaveRequestAppService(
             IRepository<LeaveRequest, Guid> repository,
-            IRepository<Employee, Guid> employeeRepository, 
+            IRepository<Employee, Guid> employeeRepository,
             IDistributedEventBus distributedEventBus)
             : base(repository)
         {
             _distributedEventBus = distributedEventBus;
-            _employeeRepository = employeeRepository; 
+            _employeeRepository = employeeRepository;
         }
 
-        
         public override async Task<PagedResultDto<LeaveRequestListDto>> GetListAsync(PagedAndSortedResultRequestDto input)
         {
             try
             {
-                
                 var query = await Repository.GetQueryableAsync();
                 var totalCount = await AsyncExecuter.CountAsync(query);
 
@@ -56,24 +54,14 @@ namespace PermissionControlSystem.Leaves
                          .Take(input.MaxResultCount)
                 );
 
-                // B. DTO'ya çevir
                 var dtos = ObjectMapper.Map<List<LeaveRequest>, List<LeaveRequestListDto>>(items);
 
-                // C. 3. DEĞİŞİKLİK: Her bir izin için Personel Adını bul ve doldur
                 foreach (var dto in dtos)
                 {
                     if (dto.EmployeeId != Guid.Empty)
                     {
-                        // Bu ID'ye sahip personel var mı?
                         var emp = await _employeeRepository.FindAsync(dto.EmployeeId);
-                        if (emp != null)
-                        {
-                            dto.EmployeeName = emp.FullName; // İsim bulundu!
-                        }
-                        else
-                        {
-                            dto.EmployeeName = "Silinmiş Personel";
-                        }
+                        dto.EmployeeName = emp != null ? $"{emp.FirstName} {emp.LastName}" : "Silinmiş Personel";
                     }
                 }
 
@@ -81,28 +69,41 @@ namespace PermissionControlSystem.Leaves
             }
             catch (Exception ex)
             {
-                var hataMesaji = ex.Message;
-                if (ex.InnerException != null)
-                {
-                    hataMesaji += " || DETAY: " + ex.InnerException.Message;
-                }
-                throw new UserFriendlyException("LİSTELEME HATASI: " + hataMesaji);
+                throw new UserFriendlyException(ex.Message);
             }
         }
 
-        // --- EKLEME (Create) - Zaten düzeltmiştik, aynen koruyoruz ---
         public override async Task<LeaveRequestDto> CreateAsync(CreateLeaveRequestDto input)
         {
             try
             {
                 if (input.EmployeeId == Guid.Empty)
+                    throw new UserFriendlyException("Personel seçilmedi.");
+
+                if (input.StartDate >= input.EndDate)
+                    throw new UserFriendlyException("Başlangıç tarihi bitiş tarihinden önce olmalıdır.");
+
+                var requestedDays = (input.EndDate - input.StartDate).TotalDays;
+
+                var query = await Repository.GetQueryableAsync();
+
+                var existingLeaves = query.Where(x =>
+                    x.EmployeeId == input.EmployeeId &&
+                    x.StartDate.Year == input.StartDate.Year &&
+                    x.Status != LeaveRequestStatus.Rejected
+                    ).ToList();
+
+                double usedDays = existingLeaves.Sum(x => (x.EndDate - x.StartDate).TotalDays);
+
+                if ((usedDays + requestedDays) > 20)
                 {
-                    throw new UserFriendlyException("HATA: Personel seçilmedi (EmployeeId boş geldi)!");
+                    throw new UserFriendlyException($"Yıllık izin kotası aşıldı. Kullanılan: {usedDays}, İstenen: {requestedDays}");
                 }
 
                 var entity = new LeaveRequest(
                     GuidGenerator.Create(),
                     input.EmployeeId,
+                    input.LeaveTypeId,
                     input.StartDate,
                     input.EndDate,
                     input.Reason
@@ -114,27 +115,23 @@ namespace PermissionControlSystem.Leaves
             }
             catch (Exception ex)
             {
-                var mesaj = ex.Message;
-                if (ex.InnerException != null) mesaj += " | DETAY: " + ex.InnerException.Message;
-                throw new UserFriendlyException("KAYIT HATASI: " + mesaj);
+                throw new UserFriendlyException(ex.Message);
             }
-        }
-
-        public override async Task DeleteAsync(Guid id)
-        {
-            await Repository.DeleteAsync(id, autoSave: true);
         }
 
         public async Task ApproveAsync(Guid id)
         {
             var leaveRequest = await Repository.GetAsync(id);
+
             leaveRequest.Status = LeaveRequestStatus.Approved;
             leaveRequest.ManagerResponse = "İstek onaylandı.";
+
             await Repository.UpdateAsync(leaveRequest);
 
             await _distributedEventBus.PublishAsync(
                 new LeaveApprovedEto
                 {
+                    EventId = Guid.NewGuid(),
                     LeaveRequestId = leaveRequest.Id,
                     ManagerResponse = leaveRequest.ManagerResponse,
                     ApproverId = CurrentUser.Id ?? Guid.Empty
@@ -144,8 +141,10 @@ namespace PermissionControlSystem.Leaves
         public async Task RejectAsync(Guid id, string reason)
         {
             var leaveRequest = await Repository.GetAsync(id);
+
             leaveRequest.Status = LeaveRequestStatus.Rejected;
             leaveRequest.ManagerResponse = reason;
+
             await Repository.UpdateAsync(leaveRequest, autoSave: true);
         }
     }
