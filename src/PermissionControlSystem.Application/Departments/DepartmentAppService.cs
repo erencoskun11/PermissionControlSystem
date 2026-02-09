@@ -1,5 +1,4 @@
 ﻿using PermissionControlSystem.Departments.Dtos; // DTO'ların olduğu namespace
-using PermissionControlSystem.Departments2;
 using System;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
