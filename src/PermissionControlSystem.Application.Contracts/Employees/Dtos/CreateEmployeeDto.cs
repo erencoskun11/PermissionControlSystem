@@ -15,8 +15,9 @@ namespace PermissionControlSystem.Employees.Dtos
 
         [Required]
         [StringLength(150)]
-        public string FullName { get; set; } = null!;
+        public string FirstName { get; set; } = null!;
 
+        public string LastName { get; set; }
         public string? Position { get; set; }
 
         [Required]
