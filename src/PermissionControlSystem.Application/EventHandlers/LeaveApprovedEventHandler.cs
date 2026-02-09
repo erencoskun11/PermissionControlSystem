@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using PermissionControlSystem.Events;
 using Polly;
 using Polly.CircuitBreaker;
@@ -9,7 +8,6 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Emailing;
 using Volo.Abp.EventBus.Distributed;
-using Npgsql; 
 
 namespace PermissionControlSystem.EventHandlers
 {
@@ -21,17 +19,10 @@ namespace PermissionControlSystem.EventHandlers
 
         private static readonly AsyncCircuitBreakerPolicy _mailCircuitBreaker = Policy
             .Handle<Exception>()
-            .CircuitBreakerAsync(
-                3,
-                TimeSpan.FromSeconds(30),
-                onBreak: (ex, time) =>
-                {
-                    Console.WriteLine($"⚠️ Mail servisi cevap vermiyor! {time.TotalSeconds} sn bekleme.");
-                },
-                onReset: () =>
-                {
-                    Console.WriteLine("✅ Mail servisi tekrar devrede.");
-                });
+            .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30),
+                onBreak: (ex, time) => Console.WriteLine($"⚠️ Mail servisi kesildi! {time.TotalSeconds} sn bekle."),
+                onReset: () => Console.WriteLine("✅ Mail servisi düzeldi.")
+            );
 
         public LeaveApprovedEventHandler(
             ILogger<LeaveApprovedEventHandler> logger,
@@ -45,15 +36,20 @@ namespace PermissionControlSystem.EventHandlers
 
         public async Task HandleEventAsync(LeaveApprovedEto eventData)
         {
-            _logger.LogInformation($"[RABBITMQ] LeaveApproved işlendi. LeaveId: {eventData.LeaveRequestId}");
+            _logger.LogInformation($"[RABBITMQ] LeaveApproved tetiklendi. LeaveId: {eventData.LeaveRequestId}");
+
+            if (await _incomingMessageRepository.AnyAsync(x => x.EventId == eventData.EventId))
+            {
+                _logger.LogWarning($"[INBOX] Bu mesaj ZATEN işlenmiş (EventId: {eventData.EventId}). İşlem atlanıyor.");
+                return;
+            }
 
             var toEmail = "eren1coskun11@gmail.com";
             var subject = "İzin Talebiniz Onaylandı!";
-            var body = "Sayın çalışanımız, izin talebiniz onaylanmıştır.";
+            var body = $"Sayın çalışanımız, izin talebiniz onaylanmıştır.\nYönetici Mesajı: {eventData.ManagerResponse}";
 
             try
             {
-                // 1. Mail gönder
                 await _mailCircuitBreaker.ExecuteAsync(async () =>
                 {
                     await _emailSender.SendAsync(toEmail, subject, body);
@@ -61,35 +57,20 @@ namespace PermissionControlSystem.EventHandlers
 
                 _logger.LogInformation("📧 Mail başarıyla gönderildi.");
 
-                // 2. Inbox kaydı → idempotency burada
-                try
-                {
-                    await _incomingMessageRepository.InsertAsync(
-                        new IncomingMessage(eventData.EventId, "LeaveApproved"),
-                        autoSave: true
-                    );
-                }
-                catch (DbUpdateException ex)
-                {
-                    // PostgreSQL unique constraint
-                    if (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-                    {
-                        _logger.LogWarning($"[INBOX] Mesaj zaten işlenmişti (EventId: {eventData.EventId}). Atlandı.");
-                        return;
-                    }
-
-                    throw;
-                }
+                await _incomingMessageRepository.InsertAsync(
+                    new IncomingMessage(eventData.EventId, "LeaveApproved"),
+                    autoSave: true
+                );
             }
             catch (BrokenCircuitException)
             {
-                _logger.LogError("🛑 Mail servisi sigortaya girdi. Mesaj tekrar denenecek.");
-                throw;
+                _logger.LogError("🛑 Mail servisi devre dışı (Circuit Breaker). Mesaj kuyruğa geri dönecek.");
+                throw; 
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ LeaveApprovedEventHandler hata aldı.");
-                throw;
+                _logger.LogError(ex, "❌ Bir hata oluştu.");
+                throw; 
             }
         }
     }
