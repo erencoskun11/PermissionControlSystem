@@ -10,7 +10,8 @@ namespace PermissionControlSystem.Employees.Dtos
         public Guid UserId { get; set; }
         public Guid DepartmentId { get; set; }
 
-        public string FullName { get; set; } = null!;
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
         public string? Position { get; set; }
 
         public string Email { get; set; }
