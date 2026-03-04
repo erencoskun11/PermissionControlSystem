@@ -1,9 +1,8 @@
-﻿using Shouldly;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
+﻿using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using NSubstitute;
+using Shouldly;
 using Volo.Abp.BlobStoring;
 using Xunit;
 
@@ -11,30 +10,23 @@ namespace PermissionControlSystem.Files
 {
     public class BlobStoringTests : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
     {
-        private readonly IBlobContainer _blobContainer;
-    
-    public BlobStoringTests()
-        {
-            _blobContainer = GetRequiredService<IBlobContainer>();
-        }
         [Fact]
         public async Task Should_Save_And_Get_File()
         {
-            //Arrange
+            var fakeBlobContainer = Substitute.For<IBlobContainer>();
+
             var fileName = "testfile.txt";
             var fileContent = "Bu bir test dosyasıdır.";
             var bytes = Encoding.UTF8.GetBytes(fileContent);
 
-            //Act
-            await _blobContainer.SaveAsync(fileName, bytes, overrideExisting: true);
+            fakeBlobContainer.GetOrNullAsync(fileName).Returns(Task.FromResult<Stream>(new MemoryStream(bytes)));
 
-            //Act
-            var savedBytes = await _blobContainer.GetAllBytesOrNullAsync(fileName);
+            await fakeBlobContainer.SaveAsync(fileName, bytes, overrideExisting: true);
 
-            //Assert
+            var savedBytes = await fakeBlobContainer.GetAllBytesOrNullAsync(fileName);
+
             savedBytes.ShouldNotBeNull();
             Encoding.UTF8.GetString(savedBytes).ShouldBe(fileContent);
         }
     }
 }
-
