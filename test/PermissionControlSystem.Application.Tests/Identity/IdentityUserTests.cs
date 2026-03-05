@@ -1,17 +1,11 @@
-﻿using System;
-using System.Linq;
+﻿using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
-using Volo.Abp.Application.Dtos;
 using Volo.Abp.Identity;
 using Xunit;
 
-// 👇 BU SATIRI EKLE (Modülünü bulması için gerekli)
-using PermissionControlSystem;
-
 namespace PermissionControlSystem.Identity
 {
-    // 🚨 DÜZELTME: Köşeli parantez içine 'PermissionControlSystemApplicationTestModule' yazıldı.
     public class IdentityUserTests : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
     {
         private readonly IIdentityUserAppService _identityUserAppService;
@@ -68,15 +62,17 @@ namespace PermissionControlSystem.Identity
             {
                 UserName = "guncellenecek",
                 Email = "update@sirket.com",
-                Password = "REDACTED_SECRET"
+                Password = "REDACTED_SECRET",
+                Name = "EskiAd",
+                Surname = "EskiSoyad"
             });
 
             var updateInput = new IdentityUserUpdateDto
             {
                 UserName = user.UserName,
                 Email = user.Email,
-                Name = "Test",
-                Surname = "Personel",
+                Name = "EskiAd",
+                Surname = "EskiSoyad",
                 PhoneNumber = "05559998877",
                 IsActive = true,
                 LockoutEnabled = true
