@@ -7,6 +7,7 @@ using Volo.Abp.Emailing;
 using Xunit;
 using Microsoft.AspNetCore.SignalR;
 using PermissionControlSystem.SignalR;
+using PermissionControlSystem.EventHandlers.DistributedEvents;
 
 namespace PermissionControlSystem.EventHandlers.Tests
 {
@@ -34,6 +35,34 @@ namespace PermissionControlSystem.EventHandlers.Tests
             );
         }
 
-       
+        [Fact]
+        public async Task HandleEventAsync_Should_Send_Email()
+        {
+            // ARRANGE
+            var eventData = new LeaveRequestCreatedEto
+            {
+                LeaveRequestId = Guid.NewGuid(),
+                StaffId = Guid.NewGuid(),
+                EmployeeName = "Ahmet Yılmaz",
+                Message = "Yeni İzin Talebi",
+                StartDate = DateTime.Today.AddDays(1),
+                EndDate = DateTime.Today.AddDays(5),
+                Reason = "Yıllık İzin"
+            };
+
+            // ACT
+            await _handler.HandleEventAsync(eventData);
+
+            // ASSERT
+            // 🔥 Düzeltilen Kısım: Mail içeriğinde StaffId yerine EmployeeName ("Ahmet Yılmaz") arıyoruz.
+            // Ayrıca SendAsync'in beklediği (to, subject, body, isBodyHtml, additionalArgs) 5 parametreyi tam veriyoruz.
+            await _fakeEmailSender.Received(1).SendAsync(
+                Arg.Any<string>(), // to (Kime)
+                Arg.Any<string>(), // subject (Konu)
+                Arg.Is<string>(body => body.Contains(eventData.EmployeeName) && body.Contains(eventData.Reason)), // body (İçerik)
+                Arg.Any<bool>(),   // isBodyHtml (HTML mi?)
+                null               // ek argümanlar
+            );
+        }
     }
 }
