@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using PermissionControlSystem.Entities;
+using PermissionControlSystem.EventHandlers.DistributedEvents;
 using PermissionControlSystem.Events;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Emailing;
