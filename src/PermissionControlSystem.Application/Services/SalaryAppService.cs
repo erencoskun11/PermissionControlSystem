@@ -125,9 +125,6 @@ namespace PermissionControlSystem.Salarys
             return ObjectMapper.Map<Salary, SalaryDto>(salary);
         }
 
-        public Task<List<SalaryDto>> SearchFromElasticAsync(string keyword)
-        {
-            throw new NotImplementedException();
-        }
+       
     }
 }
