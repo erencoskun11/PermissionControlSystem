@@ -1,57 +1,62 @@
-﻿using PermissionControlSystem.EventHandlers;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using PermissionControlSystem.Entities;
+using PermissionControlSystem.Enums;
+using PermissionControlSystem.EventHandlers.DistributedEvents;
 using PermissionControlSystem.Events;
-using PermissionControlSystem.Leaves2;
+using PermissionControlSystem.Interfaces;
+using PermissionControlSystem.Leaves;
 using Shouldly;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Emailing;
 using Xunit;
 
-namespace PermissionControlSystem.Leaves
+namespace PermissionControlSystem.Leave
 {
     public class LeaveRequestIntegrationTests : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
     {
         private readonly ILeaveRequestAppService _leaveAppService;
         private readonly IRepository<LeaveRequest, Guid> _leaveRepository;
-        private readonly LeaveApprovedEventHandler _eventHandler;
-
+        private readonly IDepartmentRepository _departmentRepository;
+        private readonly IEmployeeRepository _employeeRepository;
 
         public LeaveRequestIntegrationTests()
         {
             _leaveAppService = GetRequiredService<ILeaveRequestAppService>();
             _leaveRepository = GetRequiredService<IRepository<LeaveRequest, Guid>>();
-            _eventHandler = GetRequiredService<LeaveApprovedEventHandler>();
+            _departmentRepository = GetRequiredService<IDepartmentRepository>();
+            _employeeRepository = GetRequiredService<IEmployeeRepository>();
         }
 
         [Fact]
         public async Task Should_Approve_Leave_And_Trigger_Event()
         {
-            //Arrange
-            var leaveRequest = (await _leaveRepository.GetListAsync()).FirstOrDefault();
+            var department = await _departmentRepository.InsertAsync(new Department(Guid.NewGuid(), "Operasyon", ""), autoSave: true);
+            var employee = await _employeeRepository.InsertAsync(new Employee(Guid.NewGuid(), Guid.NewGuid(), department.Id, "Hasan", "Y", "h@test.com", "555", "Uzman"), autoSave: true);
 
-            if (leaveRequest == null)
-            {
-                return;
-            }
+            var leaveRequest = new LeaveRequest(Guid.NewGuid(), employee.Id, LeaveType.Annual, DateTime.Now.AddDays(1), DateTime.Now.AddDays(5), "Yıllık İzin");
+            await _leaveRepository.InsertAsync(leaveRequest, autoSave: true);
 
-            //Act
             await _leaveAppService.ApproveAsync(leaveRequest.Id);
 
-            //Assert 
-            var updateLeave = await _leaveRepository.GetAsync(leaveRequest.Id);
-            updateLeave.Status.ShouldBe(LeaveRequestStatus.Approved);
+            var updatedLeave = await _leaveRepository.GetAsync(leaveRequest.Id);
+            updatedLeave.Status.ShouldBe(LeaveRequestStatus.Approved);
+
+            var fakeEmailSender = Substitute.For<IEmailSender>();
+            var fakeRepo = Substitute.For<IRepository<IncomingMessage, Guid>>();
+            var eventHandler = new LeaveApprovedEventHandler(NullLogger<LeaveApprovedEventHandler>.Instance, fakeEmailSender, fakeRepo);
 
             var eto = new LeaveApprovedEto
             {
+                EventId = Guid.NewGuid(),
                 LeaveRequestId = leaveRequest.Id,
-                ManagerResponse = "Test Onayı"
+                ManagerResponse = "Test Onayı",
+                ApproverId = Guid.NewGuid()
             };
 
-            await _eventHandler.HandleEventAsync(eto);
+            await eventHandler.HandleEventAsync(eto);
         }
-
-     }
+    }
 }
