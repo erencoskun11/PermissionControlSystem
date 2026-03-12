@@ -6,6 +6,7 @@ using PermissionControlSystem.Enums;
 using PermissionControlSystem.Events;
 using PermissionControlSystem.Interfaces;
 using PermissionControlSystem.Leave.Dtos;
+using PermissionControlSystem.Leaves.Strategies;
 using PermissionControlSystem.Managers;
 using PermissionControlSystem.Notifications;
 using PermissionControlSystem.Outbox;
@@ -39,7 +40,7 @@ namespace PermissionControlSystem.Leaves
         private readonly ICurrentUser _currentUserMock;
         private readonly IDistributedCache<LeaveBalanceCacheItem, string> _leaveBalanceCacheMock; // 🔥 Yeni Cache Kalkanımız!
         private readonly LeaveRequestAppService _service;
-
+        
         private readonly IDistributedCache<LeaveRequestCacheItem, string> _singleLeaveCacheMock;
         private readonly IDistributedCache<List<LeaveRequestCacheItem>, string> _employeeLeavesCacheMock;
         private readonly IRepository<OutboxMessage, Guid> _outboxRepoMock; // 🔥 Outbox Repository Mock'u
@@ -67,14 +68,21 @@ namespace PermissionControlSystem.Leaves
 
             var monday = new DateTime(2026, 2, 23, 10, 0, 0);
             _clockMock.Now.Returns(monday);
+            // 1. Mock nesnelerini oluştur (Substitute.For kullanıyorsan)
+            var mockServiceProvider = Substitute.For<IServiceProvider>();
+            // 1. Önce boş veya sahte bir strateji listesi oluşturuyoruz
+            var strategies = new List<ILeaveCalculationStrategy>();
 
+            // 2. Fabrikayı bu listeyle ayağa kaldırıyoruz
+            var mockStrategyFactory = new LeaveStrategyFactory(strategies);
             // ✅ Pass 5 parameters to the Manager (including localEventBus and logger)
             var manager = new LeaveRequestManager(
                 _employeeRepoMock,
                 _leaveRepoMock,
                 _clockMock,
                 _localEventBusMock,
-                loggerMock
+                loggerMock,
+                mockStrategyFactory // 🔥 İŞTE BURASI EKSİKTİ!
             );
             manager.LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>();
 
