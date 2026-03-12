@@ -4,8 +4,10 @@ using PermissionControlSystem.Entities;
 using PermissionControlSystem.Events.LeaveRequest;
 using PermissionControlSystem.Interfaces;
 using PermissionControlSystem.Leaves;
+using PermissionControlSystem.Leaves.Strategies;
 using PermissionControlSystem.Managers;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.EventBus.Local;
@@ -38,15 +40,22 @@ namespace PermissionControlSystem.Jobs
             _clockMock = Substitute.For<IClock>();
 
             _clockMock.Now.Returns(new DateTime(2026, 03, 05));
+            // 1. LeaveRequestManager'ı new'lemeden hemen üst satıra şu iki kodu ekle:
+            var mockServiceProvider = Substitute.For<IServiceProvider>(); // Moq kullanıyorsan: new Mock<IServiceProvider>().Object;
+                                                                          // 1. Önce boş veya sahte bir strateji listesi oluşturuyoruz
+            var strategies = new List<ILeaveCalculationStrategy>();
 
+            // 2. Fabrikayı bu listeyle ayağa kaldırıyoruz
+            var mockStrategyFactory = new LeaveStrategyFactory(strategies);
             // 🔥 Passing the correct 5 parameters to the new Manager
             _manager = new LeaveRequestManager(
                 _employeeRepository,
                 _leaveRequestRepository,
                 _clockMock,
                 _localEventBusMock, // 4th: EventBus instead of EmailSender
-                _loggerMock         // 5th: Logger instead of CurrentUser
-            );
+                _loggerMock,         // 5th: Logger instead of CurrentUser
+            mockStrategyFactory // 🔥 EKSİK OLAN PARAMETRE EKLENDİ!
+                );
         }
 
         [Fact]
