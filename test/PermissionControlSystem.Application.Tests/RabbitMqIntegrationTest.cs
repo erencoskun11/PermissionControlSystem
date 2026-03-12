@@ -4,34 +4,33 @@ using PermissionControlSystem.Events;
 using Shouldly;
 using Volo.Abp.EventBus.Distributed;
 using Xunit;
-namespace PermissionControlSystem;
 
-[Collection(PermissionControlSystemTestConsts.CollectionDefinitionName)]
-public class RabbitMqIntegrationTest : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
+namespace PermissionControlSystem
 {
-    private readonly IDistributedEventBus _distributedEventBus;
-
-    public RabbitMqIntegrationTest()
+    [Collection(PermissionControlSystemTestConsts.CollectionDefinitionName)]
+    public class RabbitMqIntegrationTest : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
     {
-        _distributedEventBus = GetRequiredService<IDistributedEventBus>();
-    }
+        private readonly IDistributedEventBus _distributedEventBus;
 
-    [Fact]
-    public async Task Should_Connect_And_Publish_To_RabbitMq()
-    {
-        
-        var testEvent = new LeaveApprovedEto
+        public RabbitMqIntegrationTest()
         {
-            LeaveRequestId = Guid.NewGuid(),
-            ManagerResponse = "TEST OTOMASYONU: RabbitMQ Bağlantı Kontrolü 🐇",
-            ApproverId = Guid.NewGuid()
-        };
+            _distributedEventBus = GetRequiredService<IDistributedEventBus>();
+        }
 
-        // Eylem & Doğrulama
-        // Eğer RabbitMQ kapalıysa PublishAsync metodu hata fırlatır ve test başarısız olur.
-        await _distributedEventBus.PublishAsync(testEvent);
+        [Fact]
+        public async Task Should_Connect_And_Publish_To_RabbitMq()
+        {
+            var testEvent = new LeaveApprovedEto
+            {
+                EventId = Guid.NewGuid(),
+                LeaveRequestId = Guid.NewGuid(),
+                ManagerResponse = "TEST OTOMASYONU: RabbitMQ Bağlantı Kontrolü",
+                ApproverId = Guid.NewGuid()
+            };
 
-        // Buraya kadar geldiyse bağlantı başarılıdır.
-        testEvent.ShouldNotBeNull();
+            await _distributedEventBus.PublishAsync(testEvent);
+
+            testEvent.ShouldNotBeNull();
+        }
     }
 }
