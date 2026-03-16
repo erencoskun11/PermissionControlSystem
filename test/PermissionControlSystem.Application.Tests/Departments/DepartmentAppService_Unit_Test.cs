@@ -50,8 +50,9 @@ namespace PermissionControlSystem.Departments
                 _elasticMock,
                 departmentManager,
                 _departmentCacheMock,
-                _localEventBusMock // ✅ Outbox ve Notification yerine bu geldi!
-            );
+                _localEventBusMock, // ✅ Outbox ve Notification yerine bu geldi!
+            _employeeRepoMock
+                );
 
             _service.LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>();
         }
