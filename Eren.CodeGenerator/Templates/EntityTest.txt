@@ -1,0 +1,18 @@
+﻿using System;
+using PermissionControlSystem.Entities;
+using Shouldly;
+using Xunit;
+
+namespace PermissionControlSystem.Entities
+{
+    public partial class {{EntityName}}Tests
+    {
+        [Fact]
+        public void Should_Create_{{EntityName}}_With_Valid_Properties()
+        {
+            var id = Guid.NewGuid();
+            var entity = new {{EntityName}}(id);
+            entity.Id.ShouldBe(id);
+        }
+    }
+}
