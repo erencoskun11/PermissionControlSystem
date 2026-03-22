@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Emailing;
 using Xunit;
+using Microsoft.Extensions.Configuration; // 🔥 YENİ EKLENDİ
 
 namespace PermissionControlSystem.Leave
 {
@@ -46,7 +47,14 @@ namespace PermissionControlSystem.Leave
 
             var fakeEmailSender = Substitute.For<IEmailSender>();
             var fakeRepo = Substitute.For<IRepository<IncomingMessage, Guid>>();
-            var eventHandler = new LeaveApprovedEventHandler(NullLogger<LeaveApprovedEventHandler>.Instance, fakeEmailSender, fakeRepo);
+
+            // 🔥 SENIOR FIX: 4. Parametre (IConfiguration) sahte (mock) olarak eklendi!
+            var eventHandler = new LeaveApprovedEventHandler(
+                NullLogger<LeaveApprovedEventHandler>.Instance,
+                fakeEmailSender,
+                fakeRepo,
+                Substitute.For<IConfiguration>()
+            );
 
             var eto = new LeaveApprovedEto
             {
