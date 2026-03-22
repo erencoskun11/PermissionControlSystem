@@ -9,16 +9,17 @@ using PermissionControlSystem.Managers;
 using Shouldly;
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using Volo.Abp.Caching;
-using Volo.Abp.Domain.Repositories;
-using Volo.Abp.EventBus.Local; // 🔥 Artık LocalEventBus kullanıyoruz
-using Volo.Abp.ObjectMapping;
-using Volo.Abp.DependencyInjection;
-using Xunit;
 using System.Linq.Expressions;
+using System.Threading.Tasks;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Caching;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Repositories;
+using Volo.Abp.EventBus.Distributed;
+using Volo.Abp.EventBus.Local; // 🔥 Artık LocalEventBus kullanıyoruz
+using Volo.Abp.ObjectMapping;
+using Xunit;
 
 namespace PermissionControlSystem.Departments
 {
@@ -30,6 +31,7 @@ namespace PermissionControlSystem.Departments
         private readonly IDistributedCache<List<DepartmentCacheItem>, string> _departmentCacheMock;
         private readonly ILocalEventBus _localEventBusMock; // 🔥 Yeni Mock
         private readonly DepartmentAppService _service;
+        private readonly IDistributedEventBus _distributedEventBusMock; // 🔥 YENİ MOCK
 
         public DepartmentAppService_Unit_Test()
         {
@@ -39,6 +41,7 @@ namespace PermissionControlSystem.Departments
             _elasticMock = Substitute.For<IElasticSearchService>();
             _departmentCacheMock = Substitute.For<IDistributedCache<List<DepartmentCacheItem>, string>>();
             _localEventBusMock = Substitute.For<ILocalEventBus>();
+            _distributedEventBusMock = Substitute.For<IDistributedEventBus>(); // 🔥 YENİ MOCK YARATILDI
 
             // 2. Manager ve Service Kurulumu
             var departmentManager = new DepartmentManager(_departmentRepoMock, _employeeRepoMock);
@@ -46,13 +49,14 @@ namespace PermissionControlSystem.Departments
 
             // 🔥 Yeni zayıflatılmış servise sadece 5 parametre veriyoruz
             _service = new DepartmentAppService(
-                _departmentRepoMock,
-                _elasticMock,
-                departmentManager,
-                _departmentCacheMock,
-                _localEventBusMock, // ✅ Outbox ve Notification yerine bu geldi!
-            _employeeRepoMock
-                );
+          _departmentRepoMock,    // 1
+          _elasticMock,           // 2
+          departmentManager,      // 3
+          _departmentCacheMock,   // 4
+          _localEventBusMock,      // 5
+          _employeeRepoMock,       // 6 
+          _distributedEventBusMock  // 7
+      );
 
             _service.LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>();
         }
