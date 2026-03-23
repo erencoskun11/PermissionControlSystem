@@ -8,6 +8,7 @@ using Xunit;
 using Microsoft.AspNetCore.SignalR;
 using PermissionControlSystem.SignalR;
 using PermissionControlSystem.EventHandlers.DistributedEvents;
+using Microsoft.Extensions.Configuration;
 
 namespace PermissionControlSystem.EventHandlers
 {
@@ -34,7 +35,8 @@ namespace PermissionControlSystem.EventHandlers
             _handler = new LeaveRequestCreatedEventHandler(
                 NullLogger<LeaveRequestCreatedEventHandler>.Instance,
                 _fakeEmailSender,
-                _fakeHubContext
+                _fakeHubContext,
+                Substitute.For<IConfiguration>() // 🔥 2. EKSİK OLAN 4. PARAMETRE EKLENDİ!
             );
         }
 
