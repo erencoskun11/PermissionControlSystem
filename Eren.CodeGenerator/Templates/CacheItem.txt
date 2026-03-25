@@ -1,0 +1,16 @@
+﻿using System;
+
+namespace PermissionControlSystem.Caching
+{
+    public partial class {{EntityName}}CacheItem
+    {
+        public Guid Id { get; set; }
+
+        public {{EntityName}}CacheItem() { }
+
+        public {{EntityName}}CacheItem(Guid id)
+        {
+            Id = id;
+        }
+    }
+}
