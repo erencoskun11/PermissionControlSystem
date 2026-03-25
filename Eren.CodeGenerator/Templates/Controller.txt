@@ -1,0 +1,74 @@
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using PermissionControlSystem.Caching;
+using PermissionControlSystem.{{PluralName}};
+using PermissionControlSystem.{{PluralName}}.Dtos;
+using PermissionControlSystem.Permissions; // 🔥 YETKİLER İÇİN EKLENDİ
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Volo.Abp;
+using Volo.Abp.Application.Dtos;
+using Volo.Abp.AspNetCore.Mvc;
+
+namespace PermissionControlSystem.Controllers
+{
+    [RemoteService]
+    [Route("api/v1/{{PluralNameLower}}")]
+    [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Default)] // 🔥 ANA YETKİ AKTİF EDİLDİ
+    public partial class {{EntityName}}Controller : AbpController
+    {
+        private readonly I{{EntityName}}AppService _{{EntityNameLower}}AppService;
+
+        public {{EntityName}}Controller(I{{EntityName}}AppService {{EntityNameLower}}AppService)
+        {
+            _{{EntityNameLower}}AppService = {{EntityNameLower}}AppService;
+        }
+
+        [HttpGet]
+        public Task<PagedResultDto<{{EntityName}}Dto>> GetListAsync(PagedAndSortedResultRequestDto input)
+        {
+            return _{{EntityNameLower}}AppService.GetListAsync(input);
+        }
+
+        [HttpGet("cached-list")]
+        [AllowAnonymous] 
+        public Task<List<{{EntityName}}CacheItem>> GetCachedAsync()
+        {
+            return _{{EntityNameLower}}AppService.Get{{PluralName}}Async();
+        }
+
+        [HttpGet("search")]
+        public Task<List<{{EntityName}}Dto>> SearchAsync(string keyword)
+        {
+            return _{{EntityNameLower}}AppService.SearchFromElasticAsync(keyword);
+        }
+
+        [HttpGet("{id}")]
+        public Task<{{EntityName}}Dto> GetAsync(Guid id)
+        {
+            return _{{EntityNameLower}}AppService.GetAsync(id);
+        }
+
+        [HttpPost]
+        [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Create)] // 🔥 CREATE YETKİSİ AKTİF
+        public Task<{{EntityName}}Dto> CreateAsync(Create{{EntityName}}Dto input)
+        {
+            return _{{EntityNameLower}}AppService.CreateAsync(input);
+        }
+
+        [HttpPut("{id}")]
+        [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Update)] // 🔥 UPDATE YETKİSİ AKTİF
+        public Task<{{EntityName}}Dto> UpdateAsync(Guid id, Update{{EntityName}}Dto input)
+        {
+            return _{{EntityNameLower}}AppService.UpdateAsync(id, input);
+        }
+
+        [HttpDelete("{id}")]
+        [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Delete)] // 🔥 DELETE YETKİSİ AKTİF
+        public Task DeleteAsync(Guid id)
+        {
+            return _{{EntityNameLower}}AppService.DeleteAsync(id);
+        }
+    }
+}
