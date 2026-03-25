@@ -1,0 +1,27 @@
+﻿using Microsoft.EntityFrameworkCore;
+using PermissionControlSystem.Entities;
+using PermissionControlSystem.EntityFrameworkCore;
+using PermissionControlSystem.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Volo.Abp.Domain.Repositories.EntityFrameworkCore;
+using Volo.Abp.EntityFrameworkCore;
+
+namespace PermissionControlSystem.Repositories
+{
+    public partial class {{EntityName}}Repository : EfCoreRepository<PermissionControlSystemDbContext, {{EntityName}}, Guid>, I{{EntityName}}Repository
+    {
+        public {{EntityName}}Repository(IDbContextProvider<PermissionControlSystemDbContext> dbContextProvider) : base(dbContextProvider)
+        {
+        }
+
+        public async Task<List<{{EntityName}}>> GetListAsync(bool includeDetails = false, CancellationToken cancellationToken = default)
+        {
+            var query = await GetQueryableAsync();
+            return await query.ToListAsync(cancellationToken);
+        }
+    }
+}
