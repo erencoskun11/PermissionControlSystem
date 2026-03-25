@@ -1,0 +1,97 @@
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Distributed;
+using PermissionControlSystem.Caching;
+using PermissionControlSystem.{{PluralName}}.Dtos;
+using PermissionControlSystem.Entities;
+using PermissionControlSystem.Interfaces;
+using PermissionControlSystem.Managers;
+using PermissionControlSystem.Outbox;
+using PermissionControlSystem.Permissions; // 🔥 YETKİLER İÇİN EKLENDİ
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Volo.Abp;
+using Volo.Abp.Application.Dtos;
+using Volo.Abp.Application.Services;
+using Volo.Abp.Caching;
+using Volo.Abp.Domain.Repositories;
+using Volo.Abp.EventBus.Distributed;
+
+namespace PermissionControlSystem.{{PluralName}}
+{
+    [RemoteService(IsEnabled = false)]
+    [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Default)] // 🔥 ANA YETKİ EKLENDİ
+    public partial class {{EntityName}}AppService :
+        CrudAppService<
+            {{EntityName}},
+            {{EntityName}}Dto,
+            Guid,
+            PagedAndSortedResultRequestDto,
+            Create{{EntityName}}Dto,
+            Update{{EntityName}}Dto>,
+        I{{EntityName}}AppService
+    {
+        private readonly I{{EntityName}}Repository _{{EntityNameLower}}Repository;
+        private readonly IDistributedEventBus _distributedEventBus;
+        private readonly {{EntityName}}Manager _{{EntityNameLower}}Manager;
+        private readonly IDistributedCache<List<{{EntityName}}CacheItem>, string> _{{EntityNameLower}}Cache;
+        private readonly IRepository<OutboxMessage, Guid> _outboxRepository;
+
+        public {{EntityName}}AppService(
+            I{{EntityName}}Repository {{EntityNameLower}}Repository,
+            IDistributedEventBus distributedEventBus,
+            {{EntityName}}Manager {{EntityNameLower}}Manager,
+            IDistributedCache<List<{{EntityName}}CacheItem>, string> {{EntityNameLower}}Cache,
+            IRepository<OutboxMessage, Guid> outRepository) 
+            : base({{EntityNameLower}}Repository)
+        {
+            _{{EntityNameLower}}Repository = {{EntityNameLower}}Repository;
+            _distributedEventBus = distributedEventBus;
+            _{{EntityNameLower}}Manager = {{EntityNameLower}}Manager;
+            _{{EntityNameLower}}Cache = {{EntityNameLower}}Cache;
+            _outboxRepository = outRepository;
+        }
+
+        public async Task<List<{{EntityName}}CacheItem>> Get{{PluralName}}Async()
+        {
+            return await _{{EntityNameLower}}Cache.GetOrAddAsync(
+                "AllActive{{PluralName}}",
+                async () =>
+                {
+                    var items = await _{{EntityNameLower}}Repository.GetListAsync();
+                    return items.Select(d => new {{EntityName}}CacheItem(d.Id)).ToList();
+                },
+                () => new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7)
+                }
+            );
+        }
+
+        public async Task<List<{{EntityName}}Dto>> SearchFromElasticAsync(string keyword)
+        {
+            return await Task.FromResult(new List<{{EntityName}}Dto>());
+        }
+
+        [Authorize(PermissionControlSystemPermissions.{{PluralName}}.Create)] // 🔥 SADECE CREATE YETKİSİ OLANLAR!
+        public override async Task<{{EntityName}}Dto> CreateAsync(Create{{EntityName}}Dto input)
+        {
+            var {{EntityNameLower}} = await _{{EntityNameLower}}Manager.CreateAsync();
+            await _{{EntityNameLower}}Repository.InsertAsync({{EntityNameLower}}, autoSave: true);
+
+            var outboxMessage = new OutboxMessage(
+                GuidGenerator.Create(),
+                "{{EntityName}}Created",
+                JsonSerializer.Serialize(new { {{EntityNameLower}}.Id })
+            );
+            await _outboxRepository.InsertAsync(outboxMessage);
+
+            await _{{EntityNameLower}}Cache.RemoveAsync("AllActive{{PluralName}}");
+            
+            return ObjectMapper.Map<{{EntityName}}, {{EntityName}}Dto>({{EntityNameLower}});
+        }
+    }
+}
