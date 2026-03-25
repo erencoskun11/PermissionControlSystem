@@ -1,0 +1,72 @@
+﻿using NSubstitute;
+using PermissionControlSystem.{{PluralName}}.Dtos;
+using PermissionControlSystem.Entities;
+using PermissionControlSystem.Interfaces;
+using PermissionControlSystem.Managers;
+using PermissionControlSystem.Outbox;
+using Shouldly;
+using System;
+using System.Threading.Tasks;
+using Volo.Abp;
+using Volo.Abp.Domain.Repositories;
+using Volo.Abp.EventBus.Distributed;
+using Xunit;
+using Microsoft.Extensions.Caching.Distributed;
+using PermissionControlSystem.Caching;
+using System.Collections.Generic;
+using Volo.Abp.Users;
+using Volo.Abp.ObjectMapping;
+using Volo.Abp.Guids;
+using Volo.Abp.Linq;
+
+namespace PermissionControlSystem.{{PluralName}}
+{
+    public partial class {{EntityName}}AppService_Unit_Test : PermissionControlSystemApplicationTestBase<PermissionControlSystemApplicationTestModule>
+    {
+        private readonly I{{EntityName}}Repository _{{EntityNameLower}}RepoMock;
+        private readonly IDistributedEventBus _eventBusMock;
+        private readonly IDistributedCache<List<{{EntityName}}CacheItem>, string> _{{EntityNameLower}}CacheMock;
+        private readonly IRepository<OutboxMessage, Guid> _outboxRepoMock;
+        private readonly {{EntityName}}AppService _service;
+
+        public {{EntityName}}AppService_Unit_Test()
+        {
+            _{{EntityNameLower}}RepoMock = Substitute.For<I{{EntityName}}Repository>();
+            _eventBusMock = Substitute.For<IDistributedEventBus>();
+            _{{EntityNameLower}}CacheMock = Substitute.For<IDistributedCache<List<{{EntityName}}CacheItem>, string>>();
+            _outboxRepoMock = Substitute.For<IRepository<OutboxMessage, Guid>>();
+
+            var currentUserMock = Substitute.For<ICurrentUser>();
+            currentUserMock.Id.Returns(Guid.NewGuid());
+
+            var serviceProviderMock = Substitute.For<IServiceProvider>();
+            serviceProviderMock.GetService(typeof(ICurrentUser)).Returns(currentUserMock);
+            serviceProviderMock.GetService(typeof(IObjectMapper)).Returns(GetRequiredService<IObjectMapper>());
+            serviceProviderMock.GetService(typeof(IGuidGenerator)).Returns(GetRequiredService<IGuidGenerator>());
+            serviceProviderMock.GetService(typeof(IAsyncQueryableExecuter)).Returns(GetRequiredService<IAsyncQueryableExecuter>());
+
+            var lazyProvider = new AbpLazyServiceProvider(serviceProviderMock);
+            var manager = new {{EntityName}}Manager(_{{EntityNameLower}}RepoMock) { LazyServiceProvider = lazyProvider };
+
+            _service = new {{EntityName}}AppService(
+                _{{EntityNameLower}}RepoMock,
+                _eventBusMock,
+                manager,
+                _{{EntityNameLower}}CacheMock,
+                _outboxRepoMock
+            ) { LazyServiceProvider = lazyProvider };
+        }
+
+        [Fact]
+        public async Task CreateAsync_Should_Create_And_Trigger_Outbox()
+        {
+            var input = new Create{{EntityName}}Dto();
+            var result = await _service.CreateAsync(input);
+
+            result.ShouldNotBeNull();
+            await _{{EntityNameLower}}RepoMock.ReceivedWithAnyArgs(1).InsertAsync(default!);
+            await _outboxRepoMock.ReceivedWithAnyArgs(1).InsertAsync(default!);
+            await _{{EntityNameLower}}CacheMock.ReceivedWithAnyArgs(1).RemoveAsync(default!);
+        }
+    }
+}
