@@ -1,0 +1,47 @@
+﻿using PermissionControlSystem.Entities;
+using PermissionControlSystem.Managers;
+using Shouldly;
+using System;
+using System.Threading.Tasks;
+using Volo.Abp.Domain.Repositories;
+using Xunit;
+
+namespace PermissionControlSystem.{{PluralName}}
+{
+    [Collection(PermissionControlSystemTestConsts.CollectionDefinitionName)]
+    public partial class {{EntityName}}ManagerTests : PermissionControlSystemDomainTestBase<PermissionControlSystemDomainTestModule>
+    {
+        private readonly {{EntityName}}Manager _{{EntityNameLower}}Manager;
+        private readonly IRepository<{{EntityName}}, Guid> _{{EntityNameLower}}Repository;
+
+        public {{EntityName}}ManagerTests()
+        {
+            _{{EntityNameLower}}Manager = GetRequiredService<{{EntityName}}Manager>();
+            _{{EntityNameLower}}Repository = GetRequiredService<IRepository<{{EntityName}}, Guid>>();
+        }
+
+        [Fact]
+        public async Task CreateAsync_Should_Create_{{EntityName}}()
+        {
+            var result = await WithUnitOfWorkAsync(async () =>
+            {
+                return await _{{EntityNameLower}}Manager.CreateAsync();
+            });
+
+            result.ShouldNotBeNull();
+        }
+
+        [Fact]
+        public async Task CheckCanDeleteAsync_Should_Not_Throw_Exception()
+        {
+            var id = Guid.NewGuid();
+            await Should.NotThrowAsync(async () =>
+            {
+                await WithUnitOfWorkAsync(async () =>
+                {
+                    await _{{EntityNameLower}}Manager.CheckCanDeleteAsync(id);
+                });
+            });
+        }
+    }
+}
