@@ -2,8 +2,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PermissionControlSystem.Events;
 using PermissionControlSystem.Policies;
+using Polly;
 using Polly.CircuitBreaker;
-using Polly.Wrap;
 using System;
 using Volo.Abp.Caching;
 using Volo.Abp.DependencyInjection;
@@ -19,7 +19,7 @@ namespace PermissionControlSystem.EventHandlers.DistributedEvents
         private readonly IConfiguration _configuration;
         private readonly IDistributedCache<string, string> _inboxCache; 
 
-        private static readonly AsyncPolicyWrap _mailPolicy = MailResiliencePolicy.GetPolicy();
+        private static readonly ResiliencePipeline _mailPipeline = MailResiliencePolicy.GetPipeline();
         public LeaveReminderNeededEventHandler(
             IEmailSender emailSender,
             ILogger<LeaveReminderNeededEventHandler> logger,
@@ -35,7 +35,7 @@ namespace PermissionControlSystem.EventHandlers.DistributedEvents
         public async Task HandleEventAsync(LeaveReminderNeededEto eventData)
         {
           //🔥 INBOX KONTROLÜ: Bu hatırlatma zaten atıldı mı?
-            var inboxKey = $"Inbox_Reminder_{eventData.LeaveRequestId}";
+            var inboxKey = $"Inbox_Reminder_{eventData.EventId}";
             var alreadyProcessed = await _inboxCache.GetAsync(inboxKey);
 
             if (alreadyProcessed != null)
@@ -56,12 +56,16 @@ namespace PermissionControlSystem.EventHandlers.DistributedEvents
                 <small>Sent automatically by Permission Control System</small>
             ";
 
-            var managerEmail = _configuration["Settings:Email:ManagerEmail"] ?? "eren1coskun11@gmail.com";
+            var managerEmail = _configuration["Settings:Email:ManagerEmail"];
+            if (string.IsNullOrWhiteSpace(managerEmail))
+            {
+                throw new InvalidOperationException("Settings:Email:ManagerEmail configuration is required.");
+            }
 
             try
             {
                 // 🔥 POLLY İLE GÜVENLİ GÖNDERİM
-                await _mailPolicy.ExecuteAsync(async () =>
+                await _mailPipeline.ExecuteAsync(async cancellationToken =>
                 {
                     await _emailSender.SendAsync(managerEmail, emailSubject, emailBody, isBodyHtml: true);
                 });
