@@ -1,0 +1,30 @@
+﻿using System;
+using System.Threading.Tasks;
+using PermissionControlSystem.Entities;
+using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Domain.Services;
+
+namespace PermissionControlSystem.Managers
+{
+    public partial lass {{EntityName}}Manager : DomainService
+    {
+        private readonly IRepository<{{EntityName}}, Guid> _{{EntityNameLower}}Repository;
+
+        public {{EntityName}}Manager(IRepository<{{EntityName}}, Guid> {{EntityNameLower}}Repository) 
+        {
+            _{{EntityNameLower}}Repository = {{EntityNameLower}}Repository;
+        }
+
+        public async Task<{{EntityName}}> CreateAsync()
+        {
+            // TODO: İş kuralları buraya eklenecek
+            return new {{EntityName}}(GuidGenerator.Create());
+        }
+
+        public async Task CheckCanDeleteAsync(Guid id)
+        {
+            // TODO: Silinme kuralları buraya eklenecek
+            await Task.CompletedTask;
+        }
+    }
+}
