@@ -1,17 +1,32 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using Hangfire;
+using Hangfire.Dashboard;
+using Hangfire.Redis.StackExchange;
+using HealthChecks.UI.Client;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http; // 🔥 KALKAN İÇİN EKLENDİ
+using Microsoft.AspNetCore.RateLimiting; // 🔥 KALKAN İÇİN EKLENDİ
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
 using OpenIddict.Validation.AspNetCore;
 using PermissionControlSystem.EntityFrameworkCore;
+using PermissionControlSystem.EventHandlers;
+using PermissionControlSystem.Events;
+using PermissionControlSystem.Jobs;
 using PermissionControlSystem.MultiTenancy;
+using PermissionControlSystem.SignalR;
+using Prometheus;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json; // 🔥 JSON SERIALIZER İÇİN EKLENDİ
+using System.Text.Json.Serialization;
+using System.Threading.RateLimiting; // 🔥 KALKAN İÇİN EKLENDİ
 using Volo.Abp;
 using Volo.Abp.Account;
 using Volo.Abp.Account.Web;
@@ -23,12 +38,11 @@ using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Bundling;
 using Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared;
 using Volo.Abp.AspNetCore.Serilog;
 using Volo.Abp.Autofac;
+using Volo.Abp.BackgroundJobs;
+using Volo.Abp.BackgroundJobs.Hangfire;
 using Volo.Abp.Caching;
 using Volo.Abp.Caching.StackExchangeRedis;
-using Volo.Abp.EntityFrameworkCore.DistributedEvents;
-using Volo.Abp.EventBus.Distributed;
 using Volo.Abp.EventBus.RabbitMq;
-using Volo.Abp.Localization;
 using Volo.Abp.Modularity;
 using Volo.Abp.Security.Claims;
 using Volo.Abp.Swashbuckle;
@@ -38,8 +52,8 @@ using Volo.Abp.VirtualFileSystem;
 namespace PermissionControlSystem;
 
 [DependsOn(
-    typeof(AbpCachingStackExchangeRedisModule), 
-    typeof(AbpEventBusRabbitMqModule),          
+    typeof(AbpCachingStackExchangeRedisModule),
+    typeof(AbpEventBusRabbitMqModule),
     typeof(PermissionControlSystemHttpApiModule),
     typeof(AbpAutofacModule),
     typeof(AbpAspNetCoreMultiTenancyModule),
@@ -48,6 +62,8 @@ namespace PermissionControlSystem;
     typeof(AbpAspNetCoreMvcUiLeptonXLiteThemeModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpAspNetCoreSerilogModule),
+    typeof(PermissionControlSystemEventHandlersModule),
+    typeof(AbpBackgroundJobsHangfireModule),
     typeof(AbpSwashbuckleModule)
 )]
 public class PermissionControlSystemHttpApiHostModule : AbpModule
@@ -62,6 +78,13 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
                 options.UseLocalServer();
                 options.UseAspNetCore();
             });
+
+            builder.AddServer(options =>
+            {
+                options.UseAspNetCore().EnableAuthorizationEndpointPassthrough();
+                options.UseAspNetCore().EnableTokenEndpointPassthrough();
+                options.UseAspNetCore().EnableUserInfoEndpointPassthrough();
+            });
         });
     }
 
@@ -70,47 +93,137 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         var configuration = context.Services.GetConfiguration();
         var hostingEnvironment = context.Services.GetHostingEnvironment();
 
-        // --- REDIS AYARI BAŞLANGIÇ ---
+        // =====================================================================
+        // 🔥 DDOS KALKANI: IP Bazlı Kusursuz Hız Sınırlandırma Sistemi
+        // =====================================================================
+        context.Services.AddRateLimiter(options =>
+        {
+            // 1. GENEL KALKAN: Saniyede binlerce istek atıp sistemi yoranlara karşı
+            options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+            {
+                // 🔥 Proxy (Nginx vb.) arkasındayken gerçek IP'yi bul
+                var realIp = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault()
+                             ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                             ?? "unknown";
+
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: realIp,
+                    factory: partition => new FixedWindowRateLimiterOptions
+                    {
+                        AutoReplenishment = true,
+                        PermitLimit = 100, // 1 dakika içinde 100 istek
+                        QueueLimit = 0,    // Bekletme, anında reddet!
+                        Window = TimeSpan.FromMinutes(1)
+                    });
+            });
+
+            // 2. ÖZEL KALKAN (LOGIN İÇİN): Brute-Force (Şifre Deneme) saldırılarına karşı
+            options.AddPolicy("LoginPolicy", httpContext =>
+            {
+                var realIp = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault()
+                             ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                             ?? "unknown";
+
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: realIp,
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5, // 1 dakikada sadece 5 deneme hakkı!
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0
+                    });
+            });
+
+            // 3. SINIRI AŞANLARA VERİLECEK CEVAP (ABP Formatına Uygun JSON)
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = async (context, token) =>
+            {
+                context.HttpContext.Response.ContentType = "application/json";
+
+                var abpErrorResponse = new
+                {
+                    error = new
+                    {
+                        code = "429",
+                        message = "Saldırı Kalkanı Devrede: Çok fazla istek attınız. Lütfen 1 dakika bekleyip tekrar deneyin.",
+                        details = "Rate limit exceeded."
+                    }
+                };
+
+                await context.HttpContext.Response.WriteAsync(
+                    JsonSerializer.Serialize(abpErrorResponse),
+                    cancellationToken: token);
+            };
+        });
+
+        // 1. HANGFIRE KONFİGÜRASYONU
+        Configure<AbpBackgroundJobOptions>(options =>
+        {
+            options.IsJobExecutionEnabled = true;
+        });
+
+        context.Services.AddHangfire(config =>
+        {
+            var redisConnectionString = configuration["Redis:Configuration"];
+            config.UseRedisStorage(redisConnectionString);
+        });
+
+        context.Services.AddControllers();
+
+        Configure<Microsoft.AspNetCore.Mvc.JsonOptions>(options =>
+        {
+            options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+            options.JsonSerializerOptions.WriteIndented = true;
+        });
+
         Configure<AbpDistributedCacheOptions>(options =>
         {
             options.KeyPrefix = "PermissionSystem:";
         });
-        // --- REDIS AYARI BİTİŞ ---
 
-        // --- RABBITMQ AYARI BAŞLANGIÇ ---
+        // =====================================================================
+        // 🧹 TERTEMİZ ABP RABBITMQ KONFİGÜRASYONU
+        // =====================================================================
         Configure<AbpRabbitMqEventBusOptions>(options =>
         {
             options.ClientName = "PermissionSystem_Client";
             options.ExchangeName = "PermissionSystem_Exchange";
-
         });
 
-        // =======================================================
-        // 🔥 OUTBOX / INBOX AKTİF ETME (TRANSACTIONAL EVENT SYSTEM)
-        // =======================================================
-       Configure<AbpDistributedEventBusOptions>(options=>
-       {
-           options.Outboxes.Configure(config =>
-           {
-               config.UseDbContext<PermissionControlSystemDbContext>();
-           });
-      
+        Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
+        {
+            options.Filters.AddService<PermissionControlSystem.Filters.NotificationActionFilter>();
+        });
 
-            options.Inboxes.Configure(config =>
-            {
-                config.UseDbContext<PermissionControlSystemDbContext>();
-            });
-       });
-        // --- RABBITMQ AYARI BİTİŞ ---
+        // Yazdığımız özel VIP İşçisini sisteme dahil ediyoruz
+        context.Services.AddHostedService<Workers.VipLeaveRequestWorker>();
 
-
+        // =====================================================================
+        // 🏥 SENIOR DOKUNUŞU: SİSTEM SAĞLIĞI (HEALTH CHECKS)
+        // =====================================================================
+        string rabbitUrl = $"amqp://{configuration["RabbitMQ:Connections:Default:UserName"]}:{configuration["RabbitMQ:Connections:Default:Password"]}@{configuration["RabbitMQ:Connections:Default:HostName"]}:{configuration["RabbitMQ:Connections:Default:Port"]}/{configuration["RabbitMQ:Connections:Default:VirtualHost"]}".Replace("///", "/");
 
         context.Services.AddHealthChecks()
-    .AddNpgSql(configuration["ConnectionStrings:Default"], name: "Veritabani_SQL")
-    .AddRedis(configuration["Redis:Configuration"], name: "Redis_Cache");
-    
-
-
+            .AddNpgSql(configuration["ConnectionStrings:Default"] ?? "", name: "PostgreSQL Database", tags: new[] { "db", "sql", "critical" })
+            .AddRedis(
+                redisConnectionString: configuration["Redis:Configuration"] ?? "",
+                name: "Redis Cache",
+                tags: new[] { "cache", "redis", "performance" })
+            .AddElasticsearch(options =>
+                options.UseServer(configuration["Elasticsearch:Url"] ?? string.Empty)
+                    .UseBasicAuthentication(
+                        configuration["Elasticsearch:UserName"] ?? string.Empty,
+                        configuration["Elasticsearch:Password"] ?? string.Empty),
+                name: "Elasticsearch",
+                tags: new[] { "search", "database", "analytics" })
+            .AddRabbitMQ(
+                async sp =>
+                {
+                    var factory = new RabbitMQ.Client.ConnectionFactory { Uri = new Uri(rabbitUrl) };
+                    return await factory.CreateConnectionAsync();
+                },
+                name: "RabbitMQ Message Broker",
+                tags: new[] { "queue", "rabbitmq", "events" });
 
         ConfigureAuthentication(context);
         ConfigureBundles();
@@ -119,8 +232,6 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         ConfigureVirtualFileSystem(context);
         ConfigureCors(context, configuration);
         ConfigureSwaggerServices(context, configuration);
-
-
     }
 
     private void ConfigureAuthentication(ServiceConfigurationContext context)
@@ -152,7 +263,6 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         {
             options.Applications["MVC"].RootUrl = configuration["App:SelfUrl"];
             options.RedirectAllowedUrls.AddRange(configuration["App:RedirectAllowedUrls"]?.Split(',') ?? Array.Empty<string>());
-
             options.Applications["Angular"].RootUrl = configuration["App:ClientUrl"];
             options.Applications["Angular"].Urls[AccountUrlNames.PasswordReset] = "account/reset-password";
         });
@@ -167,17 +277,13 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
             Configure<AbpVirtualFileSystemOptions>(options =>
             {
                 options.FileSets.ReplaceEmbeddedByPhysical<PermissionControlSystemDomainSharedModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Domain.Shared"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Domain.Shared"));
                 options.FileSets.ReplaceEmbeddedByPhysical<PermissionControlSystemDomainModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Domain"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Domain"));
                 options.FileSets.ReplaceEmbeddedByPhysical<PermissionControlSystemApplicationContractsModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Application.Contracts"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Application.Contracts"));
                 options.FileSets.ReplaceEmbeddedByPhysical<PermissionControlSystemApplicationModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Application"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}PermissionControlSystem.Application"));
             });
         }
     }
@@ -243,17 +349,31 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
             app.UseErrorPage();
         }
 
+        // 1. ABP Barkodu burada üretiyor/yakalıyor
         app.UseCorrelationId();
+
+        // 2. DEDEKTİF KURYEMİZ
+        app.UseMiddleware<PermissionControlSystem.Middlewares.CorrelationIdEnricherMiddleware>();
+
+        app.UseStaticFiles();
         app.MapAbpStaticAssets();
+
         app.UseRouting();
+
+        // 🔥 DDOS KALKANINI DEVREYE SOKTUK
+        app.UseRateLimiter();
+
+        app.UseHttpMetrics();
         app.UseCors();
-        app.UseAuthentication();
-        app.UseAbpOpenIddictValidation();
 
         if (MultiTenancyConsts.IsEnabled)
         {
             app.UseMultiTenancy();
         }
+
+        app.UseAuthentication();
+        app.UseAbpOpenIddictValidation();
+
         app.UseUnitOfWork();
         app.UseDynamicClaims();
         app.UseAuthorization();
@@ -262,7 +382,6 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
         app.UseAbpSwaggerUI(c =>
         {
             c.SwaggerEndpoint("/swagger/v1/swagger.json", "PermissionControlSystem API");
-
             var configuration = context.ServiceProvider.GetRequiredService<IConfiguration>();
             c.OAuthClientId(configuration["AuthServer:SwaggerClientId"]);
             c.OAuthScopes("PermissionControlSystem");
@@ -270,6 +389,90 @@ public class PermissionControlSystemHttpApiHostModule : AbpModule
 
         app.UseAuditing();
         app.UseAbpSerilogEnrichers();
-        app.UseConfiguredEndpoints();
+
+        app.UseConfiguredEndpoints(endpoints =>
+        {
+            endpoints.MapHub<NotificationHub>("/my-notification-hub");
+
+            endpoints.MapHangfireDashboard("/hangfire", new DashboardOptions
+            {
+                // 🔥 HANGFIRE GÜVENLİĞİ: Sadece canlıda şifre sor, geliştirme ortamında serbest bırak!
+                Authorization = env.IsDevelopment()
+                    ? Array.Empty<IDashboardAuthorizationFilter>()
+                    : new[] { new HangfireDashboardCustomAuthorizationFilter() },
+                DashboardTitle = "İzin Sistemi Kontrol Paneli",
+                IgnoreAntiforgeryToken = true
+            });
+
+            endpoints.MapHealthChecks("/health", new HealthCheckOptions
+            {
+                ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+            });
+
+            endpoints.MapMetrics();
+        });
+
+        var recurringJobManager = context.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+
+        recurringJobManager.AddOrUpdate<LeaveReminderJob>(
+            "Daily_Leave_Check",
+            job => job.CheckOldLeavesAsync(),
+            Cron.Daily
+        );
+    }
+}
+
+// =====================================================================
+// 👇 HANGFIRE GÜVENLİK FİLTRESİ (AKTİF EDİLDİ)
+// =====================================================================
+public class HangfireDashboardCustomAuthorizationFilter : IDashboardAuthorizationFilter
+{
+    public bool Authorize(DashboardContext context)
+    {
+        var context2 = context.GetHttpContext();
+        var configuration = context2.RequestServices.GetRequiredService<IConfiguration>();
+        var expectedUsername = configuration["Hangfire:Dashboard:UserName"];
+        var expectedPassword = configuration["Hangfire:Dashboard:Password"];
+
+        if (string.IsNullOrWhiteSpace(expectedUsername) || string.IsNullOrWhiteSpace(expectedPassword))
+        {
+            context2.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return false;
+        }
+
+        // Basic Auth Header Kontrolü
+        var header = context2.Request.Headers["Authorization"].ToString();
+
+        if (!string.IsNullOrWhiteSpace(header))
+        {
+            var authValues = System.Net.Http.Headers.AuthenticationHeaderValue.Parse(header);
+
+            if ("Basic".Equals(authValues.Scheme, StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(authValues.Parameter))
+                {
+                    return false;
+                }
+
+                var parameter = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authValues.Parameter));
+                var parts = parameter.Split(':');
+
+                if (parts.Length > 1)
+                {
+                    string username = parts[0];
+                    string password = parts[1];
+
+                    if (username == expectedUsername && password == expectedPassword)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        context2.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Hangfire Dashboard\"";
+        context2.Response.StatusCode = 401; 
+
+        return false;
     }
 }
