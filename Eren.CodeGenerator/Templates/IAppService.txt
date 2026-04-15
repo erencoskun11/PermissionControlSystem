@@ -1,0 +1,22 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using PermissionControlSystem.Caching;
+using PermissionControlSystem.{{PluralName}}.Dtos;
+using Volo.Abp.Application.Dtos;
+using Volo.Abp.Application.Services;
+
+namespace PermissionControlSystem.{{PluralName}}
+{
+    public partial interface I{{EntityName}}AppService :
+        ICrudAppService<
+            {{EntityName}}Dto,
+            Guid,
+            PagedAndSortedResultRequestDto,
+            Create{{EntityName}}Dto,
+            Update{{EntityName}}Dto>
+    {
+        Task<List<{{EntityName}}CacheItem>> Get{{PluralName}}Async();
+        Task<List<{{EntityName}}Dto>> SearchFromElasticAsync(string keyword);
+    }
+}

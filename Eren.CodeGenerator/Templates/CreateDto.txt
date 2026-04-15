@@ -1,0 +1,8 @@
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace PermissionControlSystem.{{PluralName}}.Dtos
+{
+    public partial class Create{{EntityName}}Dto
+    {
+    }
+}
