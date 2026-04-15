@@ -1,0 +1,27 @@
+﻿using PermissionControlSystem.Entities;
+using PermissionControlSystem.Interfaces;
+using Shouldly;
+using System;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace PermissionControlSystem.EntityFrameworkCore.{{PluralName}}
+{
+    public partial class {{EntityName}}RepositoryTests : PermissionControlSystemEntityFrameworkCoreTestBase
+    {
+        private readonly I{{EntityName}}Repository _{{EntityNameLower}}Repository;
+
+        public {{EntityName}}RepositoryTests()
+        {
+            _{{EntityNameLower}}Repository = GetRequiredService<I{{EntityName}}Repository>();
+        }
+
+        [Fact]
+        public async Task GetListAsync_Should_Return_List()
+        {
+            await _{{EntityNameLower}}Repository.InsertAsync(new {{EntityName}}(Guid.NewGuid()), autoSave: true);
+            var result = await _{{EntityNameLower}}Repository.GetListAsync();
+            result.Count.ShouldBeGreaterThan(0);
+        }
+    }
+}
