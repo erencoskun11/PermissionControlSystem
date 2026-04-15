@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PermissionControlSystem.Events;
@@ -71,7 +72,7 @@ namespace PermissionControlSystem.EventHandlers.DistributedEvents
                 });
 
                 // 🔥 BAŞARILIYSA INBOX'A YAZ
-                await _inboxCache.SetAsync(inboxKey, "Processed", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                await _inboxCache.SetAsync(inboxKey, "Processed", new DistributedCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7)
                 });
