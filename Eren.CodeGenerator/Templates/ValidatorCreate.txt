@@ -1,0 +1,12 @@
+﻿using FluentValidation;
+using PermissionControlSystem.{{PluralName}}.Dtos;
+
+namespace PermissionControlSystem.{{PluralName}}.Validators
+{
+    public partial class Create{{EntityName}}DtoValidator : AbstractValidator<Create{{EntityName}}Dto>
+    {
+        public Create{{EntityName}}DtoValidator()
+        {
+        }
+    }
+}
