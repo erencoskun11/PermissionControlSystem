@@ -1,0 +1,25 @@
+﻿using FluentValidation.TestHelper;
+using PermissionControlSystem.{{PluralName}}.Dtos;
+using PermissionControlSystem.{{PluralName}}.Validators;
+using Xunit;
+
+namespace PermissionControlSystem.Validators.{{PluralName}}
+{
+    public partial class Create{{EntityName}}DtoValidatorTests
+    {
+        private readonly Create{{EntityName}}DtoValidator _validator;
+
+        public Create{{EntityName}}DtoValidatorTests()
+        {
+            _validator = new Create{{EntityName}}DtoValidator();
+        }
+
+        [Fact]
+        public void Should_Not_Have_Error_When_Dto_Is_Valid()
+        {
+            var dto = new Create{{EntityName}}Dto();
+            var result = _validator.TestValidate(dto);
+            result.ShouldNotHaveAnyValidationErrors();
+        }
+    }
+}
