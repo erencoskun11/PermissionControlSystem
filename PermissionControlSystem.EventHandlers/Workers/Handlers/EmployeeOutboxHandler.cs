@@ -10,10 +10,10 @@ namespace PermissionControlSystem.EventHandlers.Workers.Handlers
 {
     public class EmployeeOutboxHandler : IOutboxHandler, ITransientDependency
     {
-        public string MessageType => "Employee";
-
         private readonly IElasticSearchService _elastic;
         private readonly ILogger<EmployeeOutboxHandler> _logger;
+
+        public string MessageType => "Employee";
 
         public EmployeeOutboxHandler(IElasticSearchService elastic, ILogger<EmployeeOutboxHandler> logger)
         {
@@ -23,46 +23,57 @@ namespace PermissionControlSystem.EventHandlers.Workers.Handlers
 
         public async Task ProcessAsync(string messageType, JsonElement data)
         {
-            // 🛡️ DEFANSİF: Action oku
-            string action = data.TryGetProperty("Action", out var act) ? (act.GetString() ?? "Unknown") : "Unknown";
+            // 1. Önce değişkeni dışarıda tanımlıyoruz ki catch bloğu buna erişebilsin
+            Guid employeeId = Guid.Empty;
 
-            // 🛡️ DEFANSİF: Id oku
-            Guid employeeId = data.TryGetProperty("EmployeeId", out var idElem) ? idElem.GetGuid() : (data.TryGetProperty("Id", out var idElem2) ? idElem2.GetGuid() : Guid.Empty);
-
-            if (employeeId == Guid.Empty) return; // Geçersiz veri, çık.
-
-            if (action == "Deleted" || messageType == "EmployeeDeleted")
+            try
             {
-                await _elastic.DeleteEmployeeAsync(employeeId); // Sadece Guid yolluyoruz
-                _logger.LogInformation($"[ELASTIC] Çalışan silindi: {employeeId}");
-                return;
-            }
+                // 2. Değişkenin içini dolduruyoruz
+                var action = data.TryGetProperty("Action", out var act) ? act.GetString() ?? "Unknown" : "Unknown";
+                employeeId = data.TryGetProperty("EmployeeId", out var idElem)
+                    ? idElem.GetGuid()
+                    : (data.TryGetProperty("Id", out var fallbackIdElem) ? fallbackIdElem.GetGuid() : Guid.Empty);
 
-            // Created veya Updated işlemleri
-            
-                // 🔥 CS0037 ÇÖZÜMÜ: null yerine Guid.Empty kullanıyoruz
-                var deptId = data.TryGetProperty("DepartmentId", out var dId) && dId.ValueKind != JsonValueKind.Null ? dId.GetGuid() : Guid.Empty;
-                var deptNameRaw = data.TryGetProperty("DepartmentName", out var dName) ? dName.GetString() : null;
-                var deptName = string.IsNullOrWhiteSpace(deptNameRaw) ? "Belirtilmemiş" : deptNameRaw.Trim();
+                if (employeeId == Guid.Empty)
+                {
+                    return;
+                }
 
-                var fullNameRaw = data.TryGetProperty("FullName", out var fName) ? fName.GetString() : null;
+                if (action == "Deleted" || messageType == "EmployeeDeleted")
+                {
+                    await _elastic.DeleteEmployeeAsync(employeeId);
+                    _logger.LogInformation("[ELASTIC] Çalışan silindi: {EmployeeId}", employeeId);
+                    return;
+                }
+
+                var departmentId = data.TryGetProperty("DepartmentId", out var departmentIdProp) && departmentIdProp.ValueKind != JsonValueKind.Null
+                    ? departmentIdProp.GetGuid()
+                    : Guid.Empty;
+                var departmentNameRaw = data.TryGetProperty("DepartmentName", out var departmentNameProp) ? departmentNameProp.GetString() : null;
+                var fullNameRaw = data.TryGetProperty("FullName", out var fullNameProp) ? fullNameProp.GetString() : null;
+                var position = data.TryGetProperty("Position", out var positionProp) ? positionProp.GetString() ?? string.Empty : string.Empty;
+                var email = data.TryGetProperty("Email", out var emailProp) ? emailProp.GetString() ?? string.Empty : string.Empty;
+
+                var departmentName = string.IsNullOrWhiteSpace(departmentNameRaw) ? "Belirtilmemiş" : departmentNameRaw.Trim();
                 var fullName = string.IsNullOrWhiteSpace(fullNameRaw) ? "Bilinmiyor" : fullNameRaw.Trim();
 
-                var position = data.TryGetProperty("Position", out var pos) ? pos.GetString() ?? "" : "";
-                var email = data.TryGetProperty("Email", out var mail) ? mail.GetString() ?? "" : "";
+                await _elastic.IndexEmployeeAsync(employeeId, departmentId, departmentName, fullName, position, email);
+                _logger.LogInformation("[ELASTIC] Çalışan indexlendi: {FullName}", fullName);
 
-                // 🔥 CS7036 ÇÖZÜMÜ: Model yerine parametreleri tek tek yolluyoruz
-                await _elastic.IndexEmployeeAsync(employeeId, deptId, deptName, fullName, position, email);
-                _logger.LogInformation($"[ELASTIC] Çalışan indexlendi: {fullName}");
-
-                // 🔥 CASCADE UPDATE: çalışanın leave_request kayıtlarındaki denormalize alanları da güncelle
                 if (action == "Updated" || messageType == "EmployeeUpdated")
                 {
-                    await _elastic.UpdateLeaveRequestEmployeeDetailsAsync(employeeId, fullName, deptName);
-                    _logger.LogInformation($"[ELASTIC] Personelin leave_request kayıtları zincirleme güncellendi. EmployeeId: {employeeId}, Name: {fullName}, Department: {deptName}");
+                    await _elastic.UpdateLeaveRequestEmployeeDetailsAsync(employeeId, fullName, departmentName);
+                    _logger.LogInformation(
+                        "[ELASTIC] Personelin leave_request kayıtları güncellendi. EmployeeId: {EmployeeId}",
+                        employeeId);
                 }
             }
-           
-        
+            catch (Exception ex)
+            {
+                // Artık employeeId burada tanınıyor!
+                _logger.LogError(ex, "❌ [OUTBOX FATAL ERROR] Personel verisi (ID: {EmployeeId}) Elastic'e işlenirken patladı!", employeeId);
+                throw;
+            }
+        }
     }
 }
