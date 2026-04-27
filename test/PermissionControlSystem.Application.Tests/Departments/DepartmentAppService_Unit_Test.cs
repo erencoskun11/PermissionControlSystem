@@ -6,6 +6,7 @@ using PermissionControlSystem.Entities;
 using PermissionControlSystem.Events;
 using PermissionControlSystem.Interfaces;
 using PermissionControlSystem.Managers;
+using PermissionControlSystem.Services;
 using Shouldly;
 using System;
 using System.Collections.Generic;
