@@ -1,29 +1,20 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Text;
+using Volo.Abp.Domain.Entities;
 
 namespace PermissionControlSystem.Employees.Dtos
 {
-    public class UpdateEmployeeDto
+    public class UpdateEmployeeDto : IHasConcurrencyStamp
     {
-        [Required]
         public Guid DepartmentId { get; set; }
-
-        [Required]
-        [StringLength(150)]
-        public string FirstName { get; set; }
-        [Required]
-        public string LastName { get; set; }
-        [Required]
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
         public string? Position { get; set; }
-
-        [Required]
-        [EmailAddress]
-        public string Email { get; set; }
-
-        [Required]
-        [Phone]
-        public string PhoneNumber { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string PhoneNumber { get; set; } = string.Empty;
+        public string ConcurrencyStamp { get; set; } = string.Empty;
     }
 }
