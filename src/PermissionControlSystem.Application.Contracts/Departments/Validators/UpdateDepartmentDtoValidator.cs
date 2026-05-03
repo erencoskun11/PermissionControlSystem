@@ -7,7 +7,10 @@ namespace PermissionControlSystem.Departments.Validators
     {
         public UpdateDepartmentDtoValidator()
         {
-           
+            RuleFor(x => x.Name)
+                 .NotEmpty().WithMessage("Departman adi zorunludur");
+            RuleFor(x => x.Description)
+                .MaximumLength(500).WithMessage("Açıklama çok uzun.");
         }
     }
 }
