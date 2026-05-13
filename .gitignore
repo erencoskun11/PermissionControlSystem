@@ -263,3 +263,6 @@ src/PermissionControlSystem.Blazor.Server.Tiered/Logs/*
 
 # Use abp install-libs to restore.
 **/wwwroot/libs/*
+# Uygulama ayar dosyalari ve sirlari (Hicbiri GitHub'a gitmeyecek)
+**/appsettings.json
+**/appsettings.*.json
