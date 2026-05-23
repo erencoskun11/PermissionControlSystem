@@ -4,6 +4,7 @@ using PermissionControlSystem.Managers;
 using PermissionControlSystem.Models;
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
@@ -20,6 +21,8 @@ namespace PermissionControlSystem.Services
         private readonly IElasticSearchService _elasticSearchService;
         private readonly LeaveRequestManager _leaveRequestManager;
 
+        // 🔥 SENIOR MİMARİ: Tüm uygulama genelinde aynı anda SADECE 1 kişinin geçmesine izin veren "Turnike"
+        private static readonly SemaphoreSlim _syncLock = new SemaphoreSlim(1, 1);
         public SyncAppService(
             IRepository<Department, Guid> departmentRepository,
             IRepository<Employee, Guid> employeeRepository,
@@ -35,12 +38,20 @@ namespace PermissionControlSystem.Services
         }
 
         [HttpPost("sync-all-to-elastic")]
-        public async Task<string> SyncAllDataToElasticAsync()
+        public async Task<string> SyncAllDataToElasticAsync(CancellationToken cancellationToken = default)
         {
+            // 🔥 TURNİKE KONTROLÜ: 
+            // WaitAsync(0) diyoruz, yani kapıda bekleme! İçeride biri varsa direkt false dön.
+            if(!await _syncLock.WaitAsync(0,cancellationToken))
+            {
+                // İçeride zaten bir senkronizasyon dönüyorsa, ikinci basana bu kibar hatayı fırlatıyoruz.
+                throw new UserFriendlyException("Şu anda halihazırda bir senkronizasyon işlemi devam ediyor. Lütfen birkaç dakika bekleyip tekrar deneyin.");
+            }
+
             try
             {
                 // 1. DEPARTMANLAR
-                var departments = await _departmentRepository.GetListAsync();
+                var departments = await _departmentRepository.GetListAsync(cancellationToken: cancellationToken);
                 var deptModels = departments.Select(d => new DepartmentIndexModel
                 {
                     Id = d.Id,
@@ -48,11 +59,10 @@ namespace PermissionControlSystem.Services
                     Description = d.Description ?? "",
                     LastModificationTime = DateTime.UtcNow
                 }).ToList();
-                await _elasticSearchService.BulkIndexDepartmentsAsync(deptModels);
+                await _elasticSearchService.BulkIndexDepartmentsAsync(deptModels,cancellationToken);
 
                 // 2. ÇALIŞANLAR
-                // 🔥 SENIOR FIX: Önce ToList yapıyoruz ki ?. operatörü hata vermesin
-                var employeeEntities = await _employeeRepository.GetListAsync(includeDetails: true);
+                var employeeEntities = await _employeeRepository.GetListAsync(includeDetails: true,cancellationToken);
 
                 var empModels = employeeEntities.Select(e => new EmployeeIndexModel
                 {
@@ -67,11 +77,11 @@ namespace PermissionControlSystem.Services
                     Email = e.Email,
                     PhoneNumber = e.PhoneNumber
                 }).ToList();
-                await _elasticSearchService.BulkIndexEmployeesAsync(empModels);
+                await _elasticSearchService.BulkIndexEmployeesAsync(empModels, cancellationToken);
 
                 // 3. İZİN TALEPLERİ
                 // 🔥 SENIOR FIX: Veriyi önce veritabanından çekiyoruz (CalculateWorkingDays SQL'de çalışmaz!)
-                var leaveEntities = await _leaveRequestRepository.GetListAsync(includeDetails: true);
+                var leaveEntities = await _leaveRequestRepository.GetListAsync(includeDetails: true, cancellationToken);
 
                 var leaveModels = leaveEntities.Select(l => new LeaveIndexModel
                 {
@@ -89,13 +99,18 @@ namespace PermissionControlSystem.Services
                     DurationDays = _leaveRequestManager.CalculateWorkingDays(l.StartDate, l.EndDate)
                 }).ToList();
 
-                await _elasticSearchService.BulkIndexLeaveRequestsAsync(leaveModels);
+                await _elasticSearchService.BulkIndexLeaveRequestsAsync(leaveModels, cancellationToken);
 
                 return $"Başarılı! {deptModels.Count} Departman, {empModels.Count} Çalışan, {leaveModels.Count} İzin Talebi eşitlendi. Dashboard artık %100 doğru!";
             }
             catch (Exception ex)
             {
                 throw new UserFriendlyException($"Senkronizasyon hatası: {ex.Message}");
+            }
+            finally
+            {
+                // İşlem tamamlandığında veya hata oluştuğunda, kapıyı açmayı unutmayalım!
+                _syncLock.Release();
             }
         }
 
