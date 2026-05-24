@@ -80,6 +80,7 @@ namespace PermissionControlSystem.EventHandlers
                     targetEmployee.PhoneNumber = detailedEmployee.PhoneNumber;
                     targetEmployee.DepartmentName = departmentName;
                     targetEmployee.DepartmentId = detailedEmployee.DepartmentId;
+                    targetEmployee.ConcurrencyStamp = detailedEmployee.ConcurrencyStamp;
 
                     await _employeeListCache.SetAsync("AllActiveEmployees", cachedEmployees);
                 }
