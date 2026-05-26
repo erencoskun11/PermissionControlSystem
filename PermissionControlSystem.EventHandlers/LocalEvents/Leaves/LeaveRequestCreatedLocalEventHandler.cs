@@ -116,6 +116,7 @@ namespace PermissionControlSystem.EventHandlers.LocalEvents.Leaves
                 // 🚚 STANDART ŞERİT: Diğer tüm izinler normal kuyruğa gider.
                 await _distributedEventBus.PublishAsync(new LeaveRequestCreatedEto
                 {
+                    EventId = _guidGenerator.Create(),
                     LeaveRequestId = eventData.LeaveRequestId,
                     StaffId = eventData.EmployeeId,
                     EmployeeName = eventData.EmployeeName,

@@ -8,7 +8,7 @@ using PermissionControlSystem.Leaves;
 using PermissionControlSystem.Models;
 using PermissionControlSystem.Statistics.Dtos;
 using Polly;
-using Polly.Wrap;
+using Polly.Registry;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,28 +23,38 @@ namespace PermissionControlSystem.Services
     {
         private readonly IOpenSearchClient _elasticClient;
         private readonly ILogger<ElasticSearchService> _logger;
-
-        // 🔥 1. Polly'i dışarıdan istemek yerine içeride statik oluşturuyoruz
-        private static readonly AsyncPolicyWrap _elasticPolicy = Policy.WrapAsync(
-            Policy.Handle<Exception>().CircuitBreakerAsync(3, TimeSpan.FromSeconds(30)),
-            Policy.Handle<Exception>().WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))
-        );
+        private readonly ElasticResilienceAdapter _elasticPolicy;
 
         public ElasticSearchService(IOpenSearchClient elasticClient,
-            ILogger<ElasticSearchService> logger
-          )
+            ILogger<ElasticSearchService> logger,
+            ResiliencePipelineProvider<string> pipelineProvider)
         {
             _elasticClient = elasticClient;
             _logger = logger;
+            _elasticPolicy = new ElasticResilienceAdapter(pipelineProvider.GetPipeline("elastic"));
         }
 
+        private sealed class ElasticResilienceAdapter
+        {
+            private readonly ResiliencePipeline _pipeline;
+
+            public ElasticResilienceAdapter(ResiliencePipeline pipeline)
+            {
+                _pipeline = pipeline;
+            }
+
+            public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> callback, CancellationToken cancellationToken = default)
+            {
+                return await _pipeline.ExecuteAsync(async token => await callback(token), cancellationToken);
+            }
+        }
 
         public virtual async Task IndexLeaveRequestAsync(LeaveIndexModel model, CancellationToken cancellationToken = default)
         {
             var indexName = "leave_request";
 
             // ZIRH 1: Index var mı kontrolü
-            var existsResponse = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.Indices.ExistsAsync(indexName,d =>d,ct),cancellationToken);
+            var existsResponse = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.Indices.ExistsAsync(indexName, d => d, ct), cancellationToken);
             if (!existsResponse.Exists)
             {
                 // ZIRH 2: Index oluşturma işlemi
@@ -117,9 +127,9 @@ namespace PermissionControlSystem.Services
                 _logger.LogError($"[ELASTIC] leave_request department cascade update başarısız. EmployeeId: {employeeId}, Hata: {response.ServerError?.Error?.Reason}");
             }
         }
+
         public async Task IndexDepartmentAsync(Guid id, string name, string description, CancellationToken cancellationToken = default)
         {
-            // 1. Elasticsearch'e gönderilecek dokümanı hazırlıyoruz
             var document = new DepartmentIndexModel
             {
                 Id = id,
@@ -127,75 +137,67 @@ namespace PermissionControlSystem.Services
                 Description = description ?? "",
                 LastModificationTime = DateTime.UtcNow
             };
-            // ZIRH: İndeksleme işlemini pipeline ile sarmalıyoruz
-            var response = await _elasticPolicy.ExecuteAsync(async ct => 
+
+            var response = await _elasticPolicy.ExecuteAsync(async ct =>
             await _elasticClient.IndexAsync(document, idx => idx
-                .Index("departments") 
-                .Id(id.ToString())    
+                .Index("departments")
+                .Id(id.ToString())
                 .Refresh(Refresh.WaitFor),
                 ct)
-                ,cancellationToken
+                , cancellationToken
             );
 
             if (!response.IsValid)
             {
                 throw new Exception($"Departman verisi Elasticsearch'e yazılamadı: {response.OriginalException?.Message}");
             }
-
         }
+
         public async Task<List<DepartmentIndexModel>> SearchDepartmentAsync(string keyword, CancellationToken cancellationToken = default)
         {
-            // Eğer kullanıcı arama kutusunu boş bırakırsa, boş liste dön
             if (string.IsNullOrWhiteSpace(keyword))
             {
                 return new List<DepartmentIndexModel>();
             }
 
-            var response = await _elasticPolicy.ExecuteAsync (async ct => await _elasticClient.SearchAsync<DepartmentIndexModel>(s => s
-                .Index("departments") // Hangi index'te arayacağız?
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<DepartmentIndexModel>(s => s
+                .Index("departments")
                 .Query(q => q
                     .MultiMatch(m => m
                         .Fields(f => f
                             .Field(p => p.Name)
-                            .Field(p => p.Description) // Hem isimde hem açıklamada ara
+                            .Field(p => p.Description)
                         )
                         .Query(keyword)
-                        .Fuzziness(Fuzziness.Auto) // "IT" yerine "TI" yazsa bile bulsun (Typo-Tolerant)
-                        
+                        .Fuzziness(Fuzziness.Auto)
                     )
-                ),ct)
-                ,cancellationToken
+                ), ct)
+                , cancellationToken
             );
 
             if (!response.IsValid)
             {
-                // Gerçek bir projede burayı loglamak daha iyidir.
                 throw new UserFriendlyException($"ELASTICSEARCH HATASI: {response.OriginalException?.Message} || {response.ServerError?.Error?.Reason}");
             }
 
-            // Elasticsearch'ten dönen dokümanları (sonuçları) listeye çevirip gönderiyoruz
             return response.Documents.ToList();
         }
 
         public async Task DeleteDepartmentAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            // ZIRH: Silme işlemini pipeline ile sarmalıyoruz
             var response = await _elasticPolicy.ExecuteAsync(async ct =>
                 await _elasticClient.DeleteAsync<DepartmentIndexModel>(id, d => d
                     .Index("departments")
                 , ct),
                 cancellationToken);
 
-            // If it fails (and the error IS NOT simply because the index or document doesn't exist), we throw
             if (!response.IsValid && response.ServerError?.Error?.Type != "index_not_found_exception")
             {
-                // In a real production scenario, you might just log this rather than throwing,
-                // but throwing here helps us catch issues during development.
                 throw new Exception($"Elasticsearch Delete Error: {response.OriginalException?.Message} || {response.ServerError?.Error?.Reason}");
             }
         }
 
-        public async Task IndexEmployeeAsync(Guid id, Guid departmentId, string departmentName, string fullName, string position, string email,CancellationToken cancellationToken = default)
+        public async Task IndexEmployeeAsync(Guid id, Guid departmentId, string departmentName, string fullName, string position, string email, CancellationToken cancellationToken = default)
         {
             var employeeIndexModel = new EmployeeIndexModel
             {
@@ -207,29 +209,23 @@ namespace PermissionControlSystem.Services
                 Email = email
             };
 
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.IndexAsync(employeeIndexModel, idx => idx
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.IndexAsync(employeeIndexModel, idx => idx
                 .Index("employees")
                 .Id(id.ToString())
                 .Refresh(Refresh.WaitFor)
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
         }
 
-        // 2. YENİ METODU EKLE (EN ALTA)
-        // 🔥 SENIOR MİMARİ: Bu metod, "Bana DepartmentId'yi ver, o departmandaki BÜTÜN çalışanların adını saniyeler içinde yeni isimle değiştireyim" der!
-        // 🔥 SENIOR MİMARİ: Departman adı değiştiğinde hem personelleri hem de o personellerin geçmiş tüm izinlerindeki departman adlarını günceller!
-        // 🔥 SENIOR MİMARİ: Departman adı değiştiğinde personelleri ve onların geçmiş TÜM izinlerini tek seferde ezer!
         public async Task UpdateEmployeeDepartmentNameAsync(Guid departmentId, string newDepartmentName, CancellationToken cancellationToken = default)
         {
             try
             {
-                // 1. ADIM: Bu departmandaki personelleri bul
-                var searchResponse =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<EmployeeIndexModel>(s => s
+                var searchResponse = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<EmployeeIndexModel>(s => s
                     .Index("employees")
                     .Size(10000)
                     .Query(q => q.Term(t => t.Field(f => f.DepartmentId).Value(departmentId.ToString())))
-                    
-                ,ct), cancellationToken);
+                , ct), cancellationToken);
 
                 var employees = searchResponse.Documents.ToList();
                 if (!employees.Any())
@@ -238,7 +234,6 @@ namespace PermissionControlSystem.Services
                     return;
                 }
 
-                // 2. ADIM: Personellerin (employees index) departman adını güncelle (ZIRH 3: Toplu Güncelleme/Bulk)
                 foreach (var emp in employees) { emp.DepartmentName = newDepartmentName; }
 
                 await _elasticPolicy.ExecuteAsync(async ct =>
@@ -249,57 +244,30 @@ namespace PermissionControlSystem.Services
                     , ct),
                     cancellationToken);
 
-                // 3. ADIM: İSTATİSTİKLER İÇİN İZİNLERİ GÜNCELLE (ASIL ÇÖZÜM BURASI!)
-                // Personellerin ID'lerini bir listeye alıyoruz
-                var empIds = employees.Select(e => e.Id.ToString()).ToList();
-
-                var leaveResponse = await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.UpdateByQueryAsync<LeaveIndexModel>(u => u
-                    .Index("leave_request")
-                    .Query(q => q
-                        .Bool(b => b
-                            .Should(
-                                // ElasticSearch Index yapısına göre iki ihtimali de arıyoruz, kaçarı yok!
-                                sh => sh.Terms(t => t.Field(f => f.EmployeeId).Terms(empIds)),
-                                sh => sh.Terms(t => t.Field(f => f.EmployeeId.Suffix("keyword")).Terms(empIds))
-                            )
-                            .MinimumShouldMatch(1)
-                        )
-                    )
-                    .Script(s => s
-                        // ElasticCase duyarlılığına karşı iki alanı da mühürle
-                        .Source("ctx._source.departmentName = params.newName; ctx._source.DepartmentName = params.newName;")
-                        .Params(p => p.Add("newName", newDepartmentName))
-                    )
-                    .Refresh(true)
-                    ,ct),cancellationToken
-                );
-
-                _logger.LogInformation($"[ELASTIC BAŞARILI] {employees.Count} personelin ve {leaveResponse.Updated} izin kaydının departman adı '{newDepartmentName}' yapıldı.");
+                _logger.LogInformation("[ELASTIC BAŞARILI] {EmployeeCount} personelin departman adı '{DepartmentName}' yapıldı.", employees.Count, newDepartmentName);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[ELASTIC CASCADE ERROR] Senkronizasyon hatası: {ex.Message}");
+                _logger.LogError(ex, "[ELASTIC CASCADE ERROR] Employee index senkronizasyon hatası.");
+                throw;
             }
         }
 
-        // 🔥 SENIOR MİMARİ: Departman ID'sini kullanarak o departmandaki TÜM izinlerin adını ışık hızında günceller!
         public async Task UpdateLeaveRequestDepartmentNameByDepartmentIdAsync(Guid departmentId, string newDepartmentName, CancellationToken cancellationToken = default)
         {
             try
             {
-                var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.UpdateByQueryAsync<LeaveIndexModel>(u => u
+                var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.UpdateByQueryAsync<LeaveIndexModel>(u => u
                     .Index("leave_request")
                     .Query(q => q
-                        // 🔥 KESİN EŞLEŞME: Metin değil, Term ile tam Guid eşleşmesi arıyoruz
                         .Term(t => t.Field(f => f.DepartmentId).Value(departmentId.ToString()))
                     )
                     .Script(s => s
-                        // Elastic Case-Sensitive olduğu için her iki ihtimali de eziyoruz
                         .Source("ctx._source.departmentName = params.newDeptName; ctx._source.DepartmentName = params.newDeptName;")
                         .Params(p => p.Add("newDeptName", newDepartmentName))
                     )
                     .Refresh(true)
-                    ,ct),cancellationToken
+                    , ct), cancellationToken
                 );
 
                 if (!response.IsValid)
@@ -313,26 +281,26 @@ namespace PermissionControlSystem.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[ELASTIC C# UPDATE HATASI] {ex.Message}");
+                _logger.LogError(ex, "[ELASTIC C# UPDATE HATASI] Department bazlı izin güncellemesi başarısız.");
+                throw;
             }
         }
+
         public async Task DeleteEmployeeAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.DeleteAsync<EmployeeIndexModel>(id, d => d
+            await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.DeleteAsync<EmployeeIndexModel>(id, d => d
                 .Index("employees")
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
         }
 
         public async Task<List<EmployeeDto>> SearchEmployeeAsync(string keyword, CancellationToken cancellationToken = default)
         {
-            // 1. Arama kutusu boşsa, veritabanını hiç yormadan boş liste dönüyoruz
             if (string.IsNullOrWhiteSpace(keyword))
             {
                 return new List<EmployeeDto>();
             }
 
-            // 2. DİKKAT: Aramayı kaydettiğimiz model (EmployeeIndexModel) üzerinden yapıyoruz!
             var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<EmployeeIndexModel>(s => s
                 .Index("employees")
                 .Query(q => q
@@ -344,13 +312,19 @@ namespace PermissionControlSystem.Services
                             .Field(p => p.DepartmentName)
                         )
                         .Query(keyword)
-                        .Fuzziness(Fuzziness.Auto) // Typo Toleransı
+                        .Fuzziness(Fuzziness.Auto)
                     )
                 )
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
 
-            // 3. SENIOR DOKUNUŞU: Elastic'ten gelen Index Modellerini, DTO'ya çevirip dışarıya öyle veriyoruz (Mapping)
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Documents == null)
+            {
+                _logger.LogWarning($"[ELASTIC] SearchEmployee başarısız: {response.ServerError?.Error?.Reason}");
+                return new List<EmployeeDto>();
+            }
+
             var dtoList = response.Documents.Select(doc => new EmployeeDto
             {
                 Id = doc.Id,
@@ -370,56 +344,51 @@ namespace PermissionControlSystem.Services
 
         public async Task<List<LeaveIndexModel>> SearchLeaveRequestAsync(string keyword, CancellationToken cancellationToken = default)
         {
-            var indexName = "leave_request"; // IndexLeaveRequestAsync metodunda kullandığın isimle aynı olmalı
+            var indexName = "leave_request";
 
-            // 1. Kullanıcı boş arama yaparsa, Elastic'i hiç yormadan boş liste dön
             if (string.IsNullOrWhiteSpace(keyword))
             {
                 return new List<LeaveIndexModel>();
             }
 
-            // 2. Işık hızında arama (MultiMatch ile birden fazla kolonda arıyoruz)
-            var response = await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index(indexName)
                 .Query(q => q
                     .MultiMatch(m => m
                         .Fields(f => f
-                            .Field(p => p.EmployeeName) // Personel adında ara
-                            .Field(p => p.Description)  // İzin açıklamasında (Reason) ara
+                            .Field(p => p.EmployeeName)
+                            .Field(p => p.Description)
                         )
                         .Query(keyword)
-                        .Fuzziness(Fuzziness.Auto) // 🔥 SENIOR DOKUNUŞU: Harf hatalarını tolere et!
+                        .Fuzziness(Fuzziness.Auto)
                     )
                 )
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
 
-            if (!response.IsValid)
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Documents == null)
             {
-                _logger.LogError($"Elasticsearch Arama Hatası: {response.OriginalException?.Message}");
-                throw new Exception("Arama sırasında bir hata oluştu.");
+                _logger.LogWarning($"[ELASTIC] SearchLeaveRequest başarısız: {response.ServerError?.Error?.Reason}");
+                return new List<LeaveIndexModel>();
             }
 
-            // 3. Bulunan dokümanları (sonuçları) listeye çevirip gönder
             return response.Documents.ToList();
         }
 
-        // 🔥 İKİNCİ ZİNCİR: Çalışan adı değiştiğinde, o çalışanın tüm izin kayıtlarındaki ismi Elastic'te güncelle!
         public async Task UpdateLeaveRequestEmployeeNameAsync(Guid employeeId, string newEmployeeName, CancellationToken cancellationToken = default)
         {
-            // Not: LeaveIndexModel içinde EmployeeId alanın yoksa, modeline public Guid EmployeeId { get; set; } eklemelisin!
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.UpdateByQueryAsync<LeaveIndexModel>(u => u
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.UpdateByQueryAsync<LeaveIndexModel>(u => u
                 .Index("leave_request")
                 .Query(q => q
-                    .Match(m => m.Field(f => f.EmployeeId).Query(employeeId.ToString())) // DİKKAT: Elastic modelinde EmployeeId varsa ona göre değiştir
+                    .Match(m => m.Field(f => f.EmployeeId).Query(employeeId.ToString()))
                 )
                 .Script(s => s
                     .Source("ctx._source.employeeName = params.newName;")
                     .Params(p => p.Add("newName", newEmployeeName))
                 )
                 .Refresh(true)
-                ,ct),cancellationToken
-                
+                , ct), cancellationToken
             );
 
             if (!response.IsValid)
@@ -436,11 +405,11 @@ namespace PermissionControlSystem.Services
         {
             if (departments == null || !departments.Any()) return;
 
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.BulkAsync(b => b
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.BulkAsync(b => b
                 .Index("departments")
                 .IndexMany(departments, (descriptor, doc) => descriptor.Id(doc.Id.ToString()))
-                .Refresh(Refresh.WaitFor) // İşlem bitince hemen aranabilir olsun
-                ,ct),cancellationToken
+                .Refresh(Refresh.WaitFor)
+                , ct), cancellationToken
             );
 
             if (response.Errors)
@@ -453,11 +422,11 @@ namespace PermissionControlSystem.Services
         {
             if (employees == null || !employees.Any()) return;
 
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.BulkAsync(b => b
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.BulkAsync(b => b
                 .Index("employees")
                 .IndexMany(employees, (descriptor, doc) => descriptor.Id(doc.Id.ToString()))
                 .Refresh(Refresh.WaitFor)
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
 
             if (response.Errors)
@@ -470,11 +439,11 @@ namespace PermissionControlSystem.Services
         {
             if (leaveRequests == null || !leaveRequests.Any()) return;
 
-            var response =await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.BulkAsync(b => b
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.BulkAsync(b => b
                 .Index("leave_request")
                 .IndexMany(leaveRequests, (descriptor, doc) => descriptor.Id(doc.Id.ToString()))
                 .Refresh(Refresh.WaitFor)
-                ,ct),cancellationToken
+                , ct), cancellationToken
             );
 
             if (response.Errors)
@@ -483,10 +452,9 @@ namespace PermissionControlSystem.Services
             }
         }
 
-
         public async Task<List<LeaveTypeStatDto>> GetLeaveTypeStatsFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
             .Index("leave_request")
             .Size(0)
             .Aggregations(a => a
@@ -494,10 +462,16 @@ namespace PermissionControlSystem.Services
             .Field(f => f.LeaveType)
             )
             )
-            ,ct),cancellationToken
+            , ct), cancellationToken
             );
 
-            // Dönen sadece sayılardır, çok hafiftir!
+            // 🔥 GUARD CLAUSE: Patlamayı engeller
+            if (!response.IsValid || response.Aggregations == null)
+            {
+                _logger.LogWarning($"[ELASTIC] GetLeaveTypeStatsFromElasticAsync başarısız oldu: {response.ServerError?.Error?.Reason}");
+                return new List<LeaveTypeStatDto>();
+            }
+
             var buckets = response.Aggregations.Terms("tiplere_gore_grupla").Buckets;
 
             return buckets.Select(b => new LeaveTypeStatDto
@@ -505,31 +479,33 @@ namespace PermissionControlSystem.Services
                 LeaveTypeName = ((LeaveType)int.Parse(b.Key)).ToString(),
                 TotalCount = (int)b.DocCount
             }).ToList();
-
-
         }
-
 
         // 1. GENEL ÖZET
         public async Task<StatisticsOverviewDto> GetOverviewFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Size(0)
                 .Aggregations(a => a
                     .Terms("status_counts", t => t.Field(f => f.Status))
                     .Filter("total_approved_days", f => f
                         .Filter(fi => fi.Term(t => t.Field(field => field.Status).Value((int)LeaveRequestStatus.Approved)))
-                        // 🔥 SİHİRLİ DOKUNUŞ: Aggregations, Filter metodunun İÇİNE alındı!
                         .Aggregations(childAggs => childAggs
                             .Sum("sum_days", sum => sum.Field(field => field.DurationDays))
                         )
                     )
                 )
-            ,ct), cancellationToken);
+            , ct), cancellationToken);
 
             var result = new StatisticsOverviewDto();
-            if (response.Aggregations == null) return result;
+
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Aggregations == null)
+            {
+                _logger.LogWarning($"[ELASTIC] GetOverviewFromElasticAsync başarısız oldu: {response.ServerError?.Error?.Reason}");
+                return result;
+            }
 
             var statusBuckets = response.Aggregations.Terms("status_counts")?.Buckets;
             result.TotalRequests = (int)response.Total;
@@ -548,22 +524,27 @@ namespace PermissionControlSystem.Services
         // 2. DEPARTMAN BAZLI İSTATİSTİK
         public async Task<List<DepartmentLeaveStatDto>> GetDepartmentStatsFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Size(0)
                 .Aggregations(a => a
                     .Terms("depts", t => t
                         .Field(f => f.DepartmentName.Suffix("keyword"))
-                        // 🔥 SİHİRLİ DOKUNUŞ: Aggregations, Terms metodunun İÇİNE alındı!
                         .Aggregations(childAggs => childAggs
                             .Sum("dept_sum_days", sum => sum.Field(f => f.DurationDays))
                         )
                     )
                 )
-            ,ct), cancellationToken);
+            , ct), cancellationToken);
 
             var list = new List<DepartmentLeaveStatDto>();
-            if (response.Aggregations == null) return list;
+
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Aggregations == null)
+            {
+                _logger.LogWarning($"[ELASTIC] GetDepartmentStatsFromElasticAsync başarısız oldu: {response.ServerError?.Error?.Reason}");
+                return list;
+            }
 
             foreach (var bucket in response.Aggregations.Terms("depts").Buckets)
             {
@@ -578,17 +559,10 @@ namespace PermissionControlSystem.Services
             return list;
         }
 
-        // ==========================================
-        // 🔥 YENİ SENIOR METODLAR (ELASTICSEARCH)
-        // ==========================================
-
-        // 1. En Çok İzin Kullanan 5 Personel
-     
-        
         // 3. Aylık İzin Dağılımı (Grafik için)
         public async Task<List<MonthlyLeaveStatDto>> GetMonthlyLeavesFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Size(0)
                 .Query(q => q.Bool(b => b.Must(
@@ -600,7 +574,14 @@ namespace PermissionControlSystem.Services
                         .Aggregations(aa => aa.Sum("days_sum", sum => sum.Field(f => f.DurationDays)))
                     )
                 )
-            ,ct), cancellationToken);
+            , ct), cancellationToken);
+
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Aggregations == null)
+            {
+                _logger.LogWarning($"[ELASTIC] GetMonthlyLeavesFromElasticAsync başarısız oldu: {response.ServerError?.Error?.Reason}");
+                return new List<MonthlyLeaveStatDto>();
+            }
 
             return response.Aggregations.DateHistogram("monthly_stats").Buckets.Select(b => new MonthlyLeaveStatDto
             {
@@ -612,12 +593,19 @@ namespace PermissionControlSystem.Services
         // 4. En Eski 5 Bekleyen Talep
         public async Task<List<OldestPendingLeaveStatDto>> GetOldestPendingLeavesFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Query(q => q.Term(t => t.Field(f => f.Status).Value((int)LeaveRequestStatus.Pending)))
                 .Sort(sort => sort.Ascending(f => f.CreationTime))
                 .Size(5)
-            ,ct),cancellationToken);
+            , ct), cancellationToken);
+
+            // 🔥 GUARD CLAUSE
+            if (!response.IsValid || response.Documents == null)
+            {
+                _logger.LogWarning($"[ELASTIC] GetOldestPendingLeavesFromElasticAsync başarısız oldu: {response.ServerError?.Error?.Reason}");
+                return new List<OldestPendingLeaveStatDto>();
+            }
 
             return response.Documents.Select(d => new OldestPendingLeaveStatDto
             {
@@ -630,8 +618,7 @@ namespace PermissionControlSystem.Services
 
         public async Task DeleteLeaveRequestAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            // Elasticsearch üzerindeki 'leave_request' indeksinden bu ID'yi uçuruyoruz
-            var response =await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.DeleteAsync<LeaveIndexModel>(id, d => d.Index("leave_request"),ct),cancellationToken);
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.DeleteAsync<LeaveIndexModel>(id, d => d.Index("leave_request"), ct), cancellationToken);
 
             if (!response.IsValid)
             {
@@ -642,7 +629,7 @@ namespace PermissionControlSystem.Services
         // 1. En Çok İzin Kullanan 5 Personel
         public async Task<List<TopEmployeeStatDto>> GetTopEmployeesFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Size(0)
                 .Query(q => q.Term(t => t.Field(f => f.Status).Value((int)LeaveRequestStatus.Approved)))
@@ -652,7 +639,6 @@ namespace PermissionControlSystem.Services
                         .Size(5)
                         .Aggregations(aa => aa
                             .Sum("total_days", sum => sum.Field(f => f.DurationDays))
-                            // 🔥 DİKKAT: C# NEST için doğru syntax budur!
                             .TopHits("employee_details", th => th
                                 .Size(1)
                                 .Source(src => src.Includes(i => i.Field(f => f.DepartmentName)))
@@ -660,17 +646,16 @@ namespace PermissionControlSystem.Services
                         )
                     )
                 )
-            ,ct), cancellationToken);
+            , ct), cancellationToken);
 
+            // Zaten zırhlı
             if (!response.IsValid || response.Aggregations == null) return new List<TopEmployeeStatDto>();
 
             return response.Aggregations.Terms("per_employee").Buckets.Select(b =>
             {
-                // TopHits'ten departman adını çekiyoruz
                 var firstHit = b.TopHits("employee_details")?.Documents<LeaveIndexModel>().FirstOrDefault();
                 string deptName = firstHit?.DepartmentName;
 
-                // Boş veya null gelirse '-' koy ki JS düzgün anlasın
                 if (string.IsNullOrWhiteSpace(deptName)) deptName = "-";
 
                 return new TopEmployeeStatDto
@@ -686,7 +671,7 @@ namespace PermissionControlSystem.Services
         // 2. En Çok Reddedilen 5 Personel
         public async Task<List<RejectedEmployeeStatDto>> GetMostRejectedEmployeesFromElasticAsync(CancellationToken cancellationToken = default)
         {
-            var response =await _elasticPolicy.ExecuteAsync(async ct=> await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
+            var response = await _elasticPolicy.ExecuteAsync(async ct => await _elasticClient.SearchAsync<LeaveIndexModel>(s => s
                 .Index("leave_request")
                 .Size(0)
                 .Query(q => q.Term(t => t.Field(f => f.Status).Value((int)LeaveRequestStatus.Rejected)))
@@ -695,7 +680,6 @@ namespace PermissionControlSystem.Services
                         .Field(f => f.EmployeeName.Suffix("keyword"))
                         .Size(5)
                         .Aggregations(aa => aa
-                            // 🔥 DİKKAT: C# NEST için doğru syntax budur!
                             .TopHits("employee_details", th => th
                                 .Size(1)
                                 .Source(src => src.Includes(i => i.Field(f => f.DepartmentName)))
@@ -703,17 +687,16 @@ namespace PermissionControlSystem.Services
                         )
                     )
                 )
-            ,ct), cancellationToken);
+            , ct), cancellationToken);
 
+            // Zaten zırhlı
             if (!response.IsValid || response.Aggregations == null) return new List<RejectedEmployeeStatDto>();
 
             return response.Aggregations.Terms("rejected_employees").Buckets.Select(b =>
             {
-                // TopHits'ten departman adını çekiyoruz
                 var firstHit = b.TopHits("employee_details")?.Documents<LeaveIndexModel>().FirstOrDefault();
                 string deptName = firstHit?.DepartmentName;
 
-                // Boş veya null gelirse '-' koy ki JS düzgün anlasın
                 if (string.IsNullOrWhiteSpace(deptName)) deptName = "-";
 
                 return new RejectedEmployeeStatDto
@@ -725,5 +708,4 @@ namespace PermissionControlSystem.Services
             }).ToList();
         }
     }
-
 }
