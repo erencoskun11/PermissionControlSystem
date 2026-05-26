@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration; // 🔥 YENİ EKLENDİ
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using PermissionControlSystem.Entities;
 using PermissionControlSystem.Enums;
@@ -6,13 +7,14 @@ using PermissionControlSystem.EventHandlers.DistributedEvents;
 using PermissionControlSystem.Events;
 using PermissionControlSystem.Interfaces;
 using PermissionControlSystem.Leaves;
+using PermissionControlSystem.Leaves.Dtos;
 using Shouldly;
 using System;
 using System.Threading.Tasks;
-using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Emailing;
+using Volo.Abp.Caching;
+using Volo.Abp.Domain.Repositories;
 using Xunit;
-using Microsoft.Extensions.Configuration; // 🔥 YENİ EKLENDİ
 
 namespace PermissionControlSystem.Leave
 {
@@ -40,19 +42,23 @@ namespace PermissionControlSystem.Leave
             var leaveRequest = new LeaveRequest(Guid.NewGuid(), employee.Id, LeaveType.Annual, DateTime.Now.AddDays(1), DateTime.Now.AddDays(5), "Yıllık İzin");
             await _leaveRepository.InsertAsync(leaveRequest, autoSave: true);
 
-            await _leaveAppService.ApproveAsync(leaveRequest.Id);
-
+            // 🔥 SENIOR FIX: Test ortamında da mührü (Stamp) DTO ile birlikte gönderiyoruz!
+            // Eğer leaveRequest değişkeni bir Entity veya DTO ise, ConcurrencyStamp'i içinden alabilirsin.
+            await _leaveAppService.ApproveAsync(leaveRequest.Id, new ApproveLeaveDto
+            {
+                ConcurrencyStamp = leaveRequest.ConcurrencyStamp
+            });
             var updatedLeave = await _leaveRepository.GetAsync(leaveRequest.Id);
             updatedLeave.Status.ShouldBe(LeaveRequestStatus.Approved);
 
             var fakeEmailSender = Substitute.For<IEmailSender>();
-            var fakeRepo = Substitute.For<IRepository<IncomingMessage, Guid>>();
+            var fakeInboxCache = Substitute.For<IDistributedCache<string, string>>();
 
             // 🔥 SENIOR FIX: 4. Parametre (IConfiguration) sahte (mock) olarak eklendi!
             var eventHandler = new LeaveApprovedEventHandler(
                 NullLogger<LeaveApprovedEventHandler>.Instance,
                 fakeEmailSender,
-                fakeRepo,
+                fakeInboxCache,
                 Substitute.For<IConfiguration>()
             );
 
