@@ -13,7 +13,7 @@ using PermissionControlSystem.Events;
 using Volo.Abp.Emailing;
 using Volo.Abp;
 
-namespace PermissionControlSystem.Workers // Veya klasör yapına göre Host.Workers
+namespace PermissionControlSystem.Workers 
 {
     public class VipLeaveRequestWorker : BackgroundService
     {
