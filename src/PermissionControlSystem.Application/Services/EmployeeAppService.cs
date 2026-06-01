@@ -86,7 +86,8 @@ namespace PermissionControlSystem.Services
             return employees.Select(e => new EmployeeCacheItem(
                 e.Id, e.UserId, e.DepartmentId, e.FirstName, e.LastName,
                 $"{e.FirstName} {e.LastName}", e.Position, e.Email, e.PhoneNumber,
-                e.Department?.Name ?? "Departman Atanmamış"
+                e.Department?.Name ?? "Departman Atanmamış",
+                e.ConcurrencyStamp
             )).ToList();
         }
 
@@ -135,7 +136,8 @@ namespace PermissionControlSystem.Services
                         entity.Position,
                         entity.Email,
                         entity.PhoneNumber,
-                        entity.Department?.Name
+                        entity.Department?.Name,
+                        entity.ConcurrencyStamp
                     );
                 },
                 () => new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1) }
@@ -175,6 +177,7 @@ namespace PermissionControlSystem.Services
             var token = LazyServiceProvider.LazyGetRequiredService<ICancellationTokenProvider>().Token;
             var entity = await _employeeRepository.GetAsync(id,cancellationToken : token);
 
+            Check.NotNullOrWhiteSpace(input.ConcurrencyStamp, nameof(input.ConcurrencyStamp));
 
             // 🔥 3. MADDE ENTEGRASYONU: Mühür Tokuşturma
             // Ekrandan (input) gelen mührü, veritabanından gelen entity'ye basıyoruz.
