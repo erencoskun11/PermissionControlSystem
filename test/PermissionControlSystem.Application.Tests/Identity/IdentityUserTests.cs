@@ -24,7 +24,7 @@ namespace PermissionControlSystem.Identity
                 Email = "test@sirket.com",
                 Name = "Test",
                 Surname = "Personel",
-                Password = "REDACTED_SECRET",
+                Password = "1q2w3E*",
                 IsActive = true,
                 LockoutEnabled = true
             };
@@ -43,7 +43,7 @@ namespace PermissionControlSystem.Identity
             {
                 UserName = "aranacak_kisi",
                 Email = "aranan@sirket.com",
-                Password = "REDACTED_SECRET"
+                Password = "1q2w3E*"
             });
 
             var result = await _identityUserAppService.GetListAsync(new GetIdentityUsersInput
@@ -62,7 +62,7 @@ namespace PermissionControlSystem.Identity
             {
                 UserName = "guncellenecek",
                 Email = "update@sirket.com",
-                Password = "REDACTED_SECRET",
+                Password = "1q2w3E*",
                 Name = "EskiAd",
                 Surname = "EskiSoyad"
             });
@@ -90,7 +90,7 @@ namespace PermissionControlSystem.Identity
             {
                 UserName = "silinecek",
                 Email = "sil@sirket.com",
-                Password = "REDACTED_SECRET"
+                Password = "1q2w3E*"
             });
 
             await _identityUserAppService.DeleteAsync(user.Id);
