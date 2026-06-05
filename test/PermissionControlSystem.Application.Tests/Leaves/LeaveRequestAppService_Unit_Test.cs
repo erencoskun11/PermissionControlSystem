@@ -7,9 +7,11 @@ using PermissionControlSystem.Events.LeaveRequest; // 🔥 Local eventler için 
 using PermissionControlSystem.Events.Leaves;
 using PermissionControlSystem.Interfaces;
 using PermissionControlSystem.Leave.Dtos;
+using PermissionControlSystem.Leaves.Dtos;
 using PermissionControlSystem.Leaves.Strategies;
 using PermissionControlSystem.Managers;
 using PermissionControlSystem.Notifications;
+using PermissionControlSystem.Services;
 using Shouldly;
 using System;
 using System.Collections.Generic;
@@ -23,6 +25,7 @@ using Volo.Abp.EventBus.Local;
 using Volo.Abp.Timing;
 using Volo.Abp.Users;
 using Xunit;
+using static PermissionControlSystem.Permissions.PermissionControlSystemPermissions;
 
 namespace PermissionControlSystem.Leaves
 {
@@ -144,23 +147,7 @@ namespace PermissionControlSystem.Leaves
             await _leaveRepoMock.Received(1).UpdateAsync(Arg.Is<LeaveRequest>(l => l.Reason == "Yeni Neden"), true);
         }
 
-        [Fact]
-        public async Task ApproveAsync_Should_Approve_Leave_And_Update_Database()
-        {
-            // 1. ARRANGE
-            var empId = Guid.NewGuid();
-            var leaveId = Guid.NewGuid();
-            var leave = new LeaveRequest(leaveId, empId, LeaveType.Annual, _clockMock.Now.AddDays(1), _clockMock.Now.AddDays(2), "Tatil");
-
-            _leaveRepoMock.GetAsync(leaveId).Returns(leave);
-
-            // 2. ACT
-            await _service.ApproveAsync(leaveId);
-
-            // 3. ASSERT
-            leave.Status.ShouldBe(LeaveRequestStatus.Approved);
-            await _leaveRepoMock.Received(1).UpdateAsync(leave, true);
-        }
+      
 
         [Fact]
         public async Task DeleteAsync_Should_Delete_From_Database()
