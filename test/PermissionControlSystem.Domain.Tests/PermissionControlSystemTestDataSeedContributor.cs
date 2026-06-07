@@ -1,4 +1,4 @@
-﻿using PermissionControlSystem.Departments2;
+﻿using PermissionControlSystem.Entities;
 using System;
 using System.Collections.Generic;
 using System.Text;
