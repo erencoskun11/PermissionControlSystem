@@ -84,7 +84,7 @@ namespace PermissionControlSystem.Departments
                 {
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7)
                 },
-                token: cancellationToken // 🔥 Redis I/O işlemi için telsiz eklendi
+                token: cancellationToken 
             );
 #pragma warning restore CS8603
         }
