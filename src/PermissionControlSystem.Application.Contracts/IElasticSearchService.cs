@@ -12,7 +12,6 @@ namespace PermissionControlSystem.Services
 {
     public interface IElasticSearchService
     {
-        // --- İzin İşlemleri ---
         Task IndexLeaveRequestAsync(LeaveIndexModel model, CancellationToken cancellationToken = default);
         Task<List<LeaveIndexModel>> SearchLeaveRequestAsync(string keyword, CancellationToken cancellationToken = default);
         Task UpdateLeaveRequestEmployeeNameAsync(Guid employeeId, string newEmployeeName, CancellationToken cancellationToken = default);
